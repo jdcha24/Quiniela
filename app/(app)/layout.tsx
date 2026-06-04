@@ -6,6 +6,7 @@ import { useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
 import { useAuth } from "@/lib/hooks/useAuth";
 import { LayoutDashboard, Target, Trophy, User, ShieldCheck } from "lucide-react";
+import { getAvatarUrlFromConfig, defaultAvatarConfig } from "@/lib/utils/dicebear";
 
 const NAV_ITEMS = [
   { href: "/dashboard", label: "Inicio", icon: LayoutDashboard, id: "nav-dashboard" },
@@ -58,9 +59,14 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             <Link href="/profile" className="flex items-center gap-2">
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img
-                src={`https://api.dicebear.com/9.x/${userDoc.avatarStyle}/svg?seed=${userDoc.avatarSeed}&size=40`}
+                src={getAvatarUrlFromConfig(userDoc.avatarConfig ?? defaultAvatarConfig(userDoc.avatarSeed), 40)}
                 alt={userDoc.nickname}
                 className="w-9 h-9 rounded-xl border border-violet-500/30 bg-surface-2"
+                style={{
+                  background: (userDoc.avatarConfig ?? defaultAvatarConfig(userDoc.avatarSeed)).backgroundColor
+                    ? `#${(userDoc.avatarConfig ?? defaultAvatarConfig(userDoc.avatarSeed)).backgroundColor}`
+                    : "#1a1a28",
+                }}
               />
             </Link>
           </div>
