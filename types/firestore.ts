@@ -60,6 +60,7 @@ export interface LeaderboardEntry {
   nickname: string;
   avatarSeed: string;
   avatarStyle: AvatarStyle;
+  avatarConfig?: AvatarConfig;
   totalPoints: number;
   exactScores: number;
   correctResults: number;

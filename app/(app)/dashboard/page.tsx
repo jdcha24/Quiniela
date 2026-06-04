@@ -60,6 +60,7 @@ export default function DashboardPage() {
       nickname: userDoc.nickname,
       avatarSeed: userDoc.avatarSeed,
       avatarStyle: userDoc.avatarStyle,
+      avatarConfig: userDoc.avatarConfig || null,
       totalPoints: 0,
       exactScores: 0,
       correctResults: 0,

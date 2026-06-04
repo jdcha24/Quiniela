@@ -7,6 +7,7 @@ import { db } from "@/lib/firebase/client";
 import { useAuth } from "@/lib/hooks/useAuth";
 import { useLeaderboard } from "@/lib/hooks/useLeaderboard";
 import { TournamentDocument, LeaderboardEntry } from "@/types/firestore";
+import { getAvatarUrlFromConfig } from "@/lib/utils/dicebear";
 import { Crown, Trophy, ChevronRight } from "lucide-react";
 import Link from "next/link";
 
@@ -129,9 +130,14 @@ export default function GlobalLeaderboardPage() {
                 {/* Avatar */}
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
-                  src={`https://api.dicebear.com/9.x/${entry.avatarStyle}/svg?seed=${entry.avatarSeed}&size=40`}
+                  src={entry.avatarConfig ? getAvatarUrlFromConfig(entry.avatarConfig, 40) : `https://api.dicebear.com/9.x/${entry.avatarStyle}/svg?seed=${entry.avatarSeed}&size=40`}
                   alt={entry.nickname}
                   className={`w-10 h-10 rounded-xl border ${isMe ? "border-violet-500/50" : "border-white/10"}`}
+                  style={{
+                    background: entry.avatarConfig?.backgroundColor
+                      ? `#${entry.avatarConfig.backgroundColor}`
+                      : "#1a1a28",
+                  }}
                 />
 
                 {/* Info */}

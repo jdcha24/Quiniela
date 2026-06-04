@@ -8,6 +8,7 @@ import { useLiveMatches } from "@/lib/hooks/useLiveMatches";
 import { usePredictions } from "@/lib/hooks/usePredictions";
 import { LeaderboardEntry, PredictionDocument } from "@/types/firestore";
 import { projectScore } from "@/lib/scoring/calculator";
+import { getAvatarUrlFromConfig } from "@/lib/utils/dicebear";
 import { ArrowLeft, Crown, Flame, Sparkles } from "lucide-react";
 import Link from "next/link";
 
@@ -45,11 +46,16 @@ function LeaderboardRow({
       {/* Avatar */}
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
-        src={`https://api.dicebear.com/9.x/${entry.avatarStyle}/svg?seed=${entry.avatarSeed}&size=40`}
+        src={entry.avatarConfig ? getAvatarUrlFromConfig(entry.avatarConfig, 40) : `https://api.dicebear.com/9.x/${entry.avatarStyle}/svg?seed=${entry.avatarSeed}&size=40`}
         alt={entry.nickname}
         className={`w-10 h-10 rounded-xl border shrink-0 ${
           isCurrentUser ? "border-violet-500/50" : "border-white/10"
         }`}
+        style={{
+          background: entry.avatarConfig?.backgroundColor
+            ? `#${entry.avatarConfig.backgroundColor}`
+            : "#1a1a28",
+        }}
       />
 
       {/* Name and stats */}

@@ -2,7 +2,7 @@
 "use client";
 
 import { useState } from "react";
-import { doc, updateDoc, serverTimestamp } from "firebase/firestore";
+import { doc, updateDoc, serverTimestamp, writeBatch } from "firebase/firestore";
 import { db } from "@/lib/firebase/client";
 import { useAuth } from "@/lib/hooks/useAuth";
 import { AvatarBuilder } from "@/components/avatar/AvatarBuilder";
@@ -24,10 +24,30 @@ export default function ProfilePage() {
 
   const handleSaveAvatar = async (newConfig: AvatarConfig) => {
     setSaving(true);
-    await updateDoc(doc(db, "users", user.uid), {
+    const batch = writeBatch(db);
+
+    // Update user doc
+    batch.update(doc(db, "users", user.uid), {
       avatarConfig: newConfig,
+      avatarStyle: newConfig.style,
+      avatarSeed: newConfig.seed,
       updatedAt: serverTimestamp(),
     });
+
+    // Update active tournaments leaderboard entries
+    if (userDoc.activeTournamentIds && userDoc.activeTournamentIds.length > 0) {
+      userDoc.activeTournamentIds.forEach((tId) => {
+        const leaderboardRef = doc(db, "tournaments", tId, "leaderboard", user.uid);
+        batch.set(leaderboardRef, {
+          avatarConfig: newConfig,
+          avatarStyle: newConfig.style,
+          avatarSeed: newConfig.seed,
+          lastUpdated: serverTimestamp(),
+        }, { merge: true });
+      });
+    }
+
+    await batch.commit();
     setSaving(false);
     setSaved(true);
     setEditingAvatar(false);
