@@ -1,0 +1,218 @@
+// app/(app)/tournament/[tournamentId]/leaderboard/page.tsx
+"use client";
+
+import { useParams } from "next/navigation";
+import { useAuth } from "@/lib/hooks/useAuth";
+import { useLeaderboard } from "@/lib/hooks/useLeaderboard";
+import { useLiveMatches } from "@/lib/hooks/useLiveMatches";
+import { usePredictions } from "@/lib/hooks/usePredictions";
+import { LeaderboardEntry, PredictionDocument } from "@/types/firestore";
+import { projectScore } from "@/lib/scoring/calculator";
+import { ArrowLeft, Crown, Flame, Sparkles } from "lucide-react";
+import Link from "next/link";
+
+function RankBadge({ rank }: { rank: number }) {
+  if (rank === 1) return <Crown className="w-5 h-5 text-amber-400 fill-amber-400" />;
+  if (rank === 2) return <span className="rank-silver text-lg font-black">2°</span>;
+  if (rank === 3) return <span className="rank-bronze text-lg font-black">3°</span>;
+  return <span className="text-white/50 text-base font-bold">{rank}°</span>;
+}
+
+function LeaderboardRow({
+  entry,
+  isCurrentUser,
+  projectedBonus,
+}: {
+  entry: LeaderboardEntry;
+  isCurrentUser: boolean;
+  projectedBonus: number;
+}) {
+  const projectedTotal = entry.totalPoints + projectedBonus;
+
+  return (
+    <div
+      className={`flex items-center gap-3 p-3 rounded-2xl transition-all duration-200 ${
+        isCurrentUser
+          ? "bg-violet-500/15 border border-violet-500/30 glow-primary"
+          : "bg-white/3 border border-transparent hover:bg-white/5"
+      }`}
+    >
+      {/* Rank */}
+      <div className="w-8 flex justify-center shrink-0">
+        <RankBadge rank={entry.rank} />
+      </div>
+
+      {/* Avatar */}
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={`https://api.dicebear.com/9.x/${entry.avatarStyle}/svg?seed=${entry.avatarSeed}&size=40`}
+        alt={entry.nickname}
+        className={`w-10 h-10 rounded-xl border shrink-0 ${
+          isCurrentUser ? "border-violet-500/50" : "border-white/10"
+        }`}
+      />
+
+      {/* Name and stats */}
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center gap-1.5">
+          <span className={`font-bold text-sm truncate ${isCurrentUser ? "text-violet-300" : "text-white"}`}>
+            {entry.nickname}
+          </span>
+          {isCurrentUser && (
+            <span className="text-[10px] text-violet-400 font-semibold">(tú)</span>
+          )}
+        </div>
+        <div className="flex items-center gap-2 mt-0.5">
+          <span className="text-xs text-white/30">{entry.exactScores} exactos</span>
+          <span className="text-white/15">·</span>
+          <span className="text-xs text-white/30">{entry.correctResults} resultados</span>
+        </div>
+      </div>
+
+      {/* Points */}
+      <div className="flex flex-col items-end shrink-0">
+        <span className={`text-xl font-black ${isCurrentUser ? "text-violet-300" : "text-white"}`}>
+          {entry.totalPoints}
+        </span>
+        {projectedBonus > 0 && (
+          <div className="flex items-center gap-0.5 text-cyan-400">
+            <Flame className="w-3 h-3" />
+            <span className="text-xs font-bold">+{projectedBonus}</span>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+export default function LeaderboardPage() {
+  const params = useParams();
+  const tournamentId = params.tournamentId as string;
+  const { user } = useAuth();
+
+  const { entries, loading } = useLeaderboard(tournamentId);
+  const { matches } = useLiveMatches(tournamentId);
+  const { predictions } = usePredictions(user?.uid ?? null);
+
+  // Calculate live projected bonuses per user
+  const liveMatches = matches.filter((m) => m.status === "LIVE" || m.status === "HT");
+
+  const calculateProjectedBonus = (userId: string): number => {
+    if (liveMatches.length === 0) return 0;
+    return liveMatches.reduce((total, match) => {
+      const pred = (predictions as Map<string, PredictionDocument>).get(match.id);
+      if (!pred) return total;
+      const score1 = projectScore(
+        { predictedHome: pred.predictedHome, predictedAway: pred.predictedAway },
+        { home: match.liveScore.home, away: match.liveScore.away }
+      );
+      let score2: number | null = null;
+      if (
+        pred.predictedHome2 !== null &&
+        pred.predictedHome2 !== undefined &&
+        pred.predictedAway2 !== null &&
+        pred.predictedAway2 !== undefined
+      ) {
+        score2 = projectScore(
+          { predictedHome: pred.predictedHome2, predictedAway: pred.predictedAway2 },
+          { home: match.liveScore.home, away: match.liveScore.away }
+        );
+      }
+      const maxScore = score2 !== null ? Math.max(score1 ?? 0, score2 ?? 0) : (score1 ?? 0);
+      return total + maxScore;
+    }, 0);
+  };
+
+  const myProjectedBonus = user ? calculateProjectedBonus(user.uid) : 0;
+
+  return (
+    <div className="px-4 py-5 space-y-5 animate-fade-up">
+      {/* Header */}
+      <div className="flex items-center gap-3">
+        <Link
+          href={`/tournament/${tournamentId}`}
+          className="w-9 h-9 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center
+            hover:bg-white/10 active:scale-90 transition-all"
+        >
+          <ArrowLeft className="w-4 h-4 text-white/70" />
+        </Link>
+        <div>
+          <h2 className="text-xl font-black text-white flex items-center gap-2">
+            <Crown className="w-5 h-5 text-amber-400" />
+            Tabla de posiciones
+          </h2>
+          <p className="text-xs text-white/40">{entries.length} participantes</p>
+        </div>
+      </div>
+
+      {/* Live projection banner */}
+      {liveMatches.length > 0 && (
+        <div className="glass-card rounded-2xl p-4 border border-red-500/30 glow-orange">
+          <div className="flex items-center gap-2 mb-2">
+            <div className="w-2 h-2 rounded-full bg-red-400 animate-live-pulse" />
+            <span className="text-red-400 text-xs font-bold uppercase tracking-wider">
+              {liveMatches.length} partido(s) en vivo
+            </span>
+          </div>
+          <p className="text-xs text-white/50">
+            Los puntos proyectados (
+            <Flame className="inline w-3 h-3 text-cyan-400" />
+            ) muestran lo que ganarías con los marcadores actuales.
+          </p>
+          {myProjectedBonus > 0 && (
+            <div className="mt-2 flex items-center gap-2 text-cyan-400">
+              <Sparkles className="w-4 h-4" />
+              <span className="text-sm font-bold">
+                Tú proyectas +{myProjectedBonus} puntos más
+              </span>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Leaderboard */}
+      {loading ? (
+        <div className="space-y-2">
+          {[...Array(8)].map((_, i) => (
+            <div key={i} className="h-16 rounded-2xl bg-white/5 animate-pulse" />
+          ))}
+        </div>
+      ) : entries.length === 0 ? (
+        <div className="glass-card rounded-2xl p-10 text-center space-y-2">
+          <Crown className="w-10 h-10 text-white/20 mx-auto" />
+          <p className="text-white/40 text-sm">Nadie ha registrado puntos aún.</p>
+        </div>
+      ) : (
+        <div className="space-y-1.5">
+          {entries.map((entry, i) => (
+            <LeaderboardRow
+              key={entry.userId}
+              entry={entry}
+              isCurrentUser={entry.userId === user?.uid}
+              projectedBonus={entry.userId === user?.uid ? myProjectedBonus : 0}
+            />
+          ))}
+        </div>
+      )}
+
+      {/* Scoring legend */}
+      <div className="glass-card rounded-2xl p-4 space-y-3">
+        <h4 className="text-xs font-bold text-white/50 uppercase tracking-wider">Sistema de puntos</h4>
+        <div className="space-y-2">
+          {[
+            { pts: 3, label: "Marcador exacto", color: "text-emerald-400 bg-emerald-500/15" },
+            { pts: 1, label: "Resultado correcto (G/E/P)", color: "text-amber-400 bg-amber-500/15" },
+            { pts: 0, label: "Fallo total", color: "text-red-400 bg-red-500/15" },
+          ].map(({ pts, label, color }) => (
+            <div key={pts} className="flex items-center gap-3">
+              <span className={`w-8 h-8 rounded-lg flex items-center justify-center text-sm font-black ${color}`}>
+                {pts}
+              </span>
+              <span className="text-xs text-white/50">{label}</span>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
