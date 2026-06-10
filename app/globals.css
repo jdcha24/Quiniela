@@ -119,3 +119,56 @@
 .stat-badge {
   @apply px-2 py-0.5 rounded-full text-xs font-semibold;
 }
+
+/* ── Splash Screen Animations ─────────────────────────────────── */
+@keyframes splash-logo-enter {
+  0% {
+    opacity: 0;
+    transform: scale(0.65) translateY(20px);
+    filter: blur(10px);
+  }
+  60% {
+    opacity: 1;
+    transform: scale(1.05) translateY(-5px);
+    filter: blur(0px);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+@keyframes splash-logo-pulse {
+  0%, 100% {
+    transform: scale(1);
+    filter: drop-shadow(0 0 15px rgba(124, 58, 237, 0.4));
+  }
+  50% {
+    transform: scale(1.03);
+    filter: drop-shadow(0 0 30px rgba(124, 58, 237, 0.75));
+  }
+}
+
+@keyframes splash-bg-pulse {
+  0%, 100% {
+    opacity: 0.15;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.35;
+    transform: scale(1.1);
+  }
+}
+
+.animate-splash-logo-enter {
+  animation: splash-logo-enter 1s cubic-bezier(0.23, 1, 0.32, 1) forwards;
+}
+
+.animate-splash-logo-pulse {
+  animation: splash-logo-pulse 2s ease-in-out infinite;
+}
+
+.animate-splash-bg-pulse {
+  animation: splash-bg-pulse 4s ease-in-out infinite;
+}
+
