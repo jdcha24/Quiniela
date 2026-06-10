@@ -231,6 +231,12 @@ export default function AdminDashboard() {
                   >
                     Ver →
                   </Link>
+                  <Link
+                    href={`/admin/tournaments/new?tournamentId=${t.id}`}
+                    className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-amber-500/10 text-amber-400 hover:bg-amber-500/20 transition-all"
+                  >
+                    + Partidos
+                  </Link>
                 </div>
               </div>
             ))}

@@ -2,14 +2,17 @@
 // 2-Step admin tournament builder: Step 1 = Pick leagues, Step 2 = Pick fixtures
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, Suspense } from "react";
 import { useAuth } from "@/lib/hooks/useAuth";
 import { ApiLeagueResponse, ApiFixtureResponse } from "@/types/api-football";
 import {
   Search, ChevronLeft, ChevronRight, Check, Loader2,
   Globe, Trophy, Calendar, Filter, Plus, ArrowRight, Flame
 } from "lucide-react";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
+import { doc, getDoc } from "firebase/firestore";
+import { db } from "@/lib/firebase/client";
+import { TournamentDocument } from "@/types/firestore";
 
 type Step = 1 | 2 | 3;
 
@@ -18,8 +21,24 @@ async function getIdToken(user: { getIdToken: () => Promise<string> }) {
 }
 
 export default function NewTournamentPage() {
+  return (
+    <Suspense fallback={
+      <div className="flex flex-col items-center justify-center py-20 gap-3">
+        <Loader2 className="w-8 h-8 animate-spin text-amber-500" />
+        <span className="text-sm text-white/50">Cargando constructor...</span>
+      </div>
+    }>
+      <NewTournamentContent />
+    </Suspense>
+  );
+}
+
+function NewTournamentContent() {
   const { user } = useAuth();
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const editTournamentId = searchParams.get("tournamentId");
+  const [targetTournament, setTargetTournament] = useState<TournamentDocument | null>(null);
   const [step, setStep] = useState<Step>(1);
 
   // Season & Status Configurations
@@ -48,6 +67,31 @@ export default function NewTournamentPage() {
   const [tournamentName, setTournamentName] = useState("");
   const [tournamentDesc, setTournamentDesc] = useState("");
   const [creating, setCreating] = useState(false);
+
+  // Load target tournament if editTournamentId is present
+  useEffect(() => {
+    if (!editTournamentId) return;
+
+    const fetchTournament = async () => {
+      try {
+        const docRef = doc(db, "tournaments", editTournamentId);
+        const docSnap = await getDoc(docRef);
+        if (docSnap.exists()) {
+          const data = docSnap.data() as TournamentDocument;
+          setTargetTournament(data);
+          setTournamentName(data.name);
+          setTournamentDesc(data.description || "");
+          // Pre-select existing leagues
+          if (data.leagueIds && data.leagueIds.length > 0) {
+            setSelectedLeagues(new Set(data.leagueIds));
+          }
+        }
+      } catch (err) {
+        console.error("Error loading tournament details:", err);
+      }
+    };
+    fetchTournament();
+  }, [editTournamentId]);
 
   function todayStr() {
     return new Date().toISOString().split("T")[0];
@@ -191,6 +235,7 @@ export default function NewTournamentPage() {
         "Content-Type": "application/json",
       },
       body: JSON.stringify({
+        tournamentId: editTournamentId || undefined,
         name: tournamentName.trim(),
         description: tournamentDesc.trim(),
         leagueIds: [...selectedLeagues],
@@ -210,7 +255,7 @@ export default function NewTournamentPage() {
   const steps = [
     { num: 1, label: "Ligas" },
     { num: 2, label: "Partidos" },
-    { num: 3, label: "Crear" },
+    { num: 3, label: targetTournament ? "Agregar" : "Crear" },
   ];
 
   return (
@@ -254,9 +299,13 @@ export default function NewTournamentPage() {
       {step === 1 && (
         <div className="space-y-4">
           <div>
-            <h2 className="text-xl font-black text-white">Paso 1: Selecciona ligas</h2>
+            <h2 className="text-xl font-black text-white">
+              {targetTournament ? `Agregar partidos a: ${targetTournament.name}` : "Paso 1: Selecciona ligas"}
+            </h2>
             <p className="text-xs text-white/40 mt-1">
-              Elige las ligas/copas de las que quieres importar partidos.
+              {targetTournament 
+                ? "Elige ligas adicionales o mantén las seleccionadas para importar nuevos partidos." 
+                : "Elige las ligas/copas de las que quieres importar partidos."}
             </p>
           </div>
 
@@ -508,7 +557,7 @@ export default function NewTournamentPage() {
               bg-amber-500 text-black hover:bg-amber-400 active:scale-95 transition-all
               disabled:opacity-40 disabled:cursor-not-allowed"
           >
-            Siguiente: Crear torneo
+            {targetTournament ? "Siguiente: Confirmar adición" : "Siguiente: Crear torneo"}
             <ArrowRight className="w-5 h-5" />
           </button>
         </div>
@@ -522,7 +571,9 @@ export default function NewTournamentPage() {
               <ChevronLeft className="w-4 h-4 text-white/70" />
             </button>
             <div>
-              <h2 className="text-xl font-black text-white">Paso 3: Detalles del torneo</h2>
+              <h2 className="text-xl font-black text-white">
+                {targetTournament ? "Paso 3: Confirmar adición" : "Paso 3: Detalles del torneo"}
+              </h2>
               <p className="text-xs text-white/40">{selectedFixtures.size} partidos seleccionados</p>
             </div>
           </div>
@@ -535,7 +586,7 @@ export default function NewTournamentPage() {
               <span className="font-bold text-white">{selectedLeagues.size}</span>
             </div>
             <div className="flex items-center justify-between text-sm">
-              <span className="text-white/50">Partidos</span>
+              <span className="text-white/50">Partidos nuevos</span>
               <span className="font-bold text-emerald-400">{selectedFixtures.size}</span>
             </div>
           </div>
@@ -549,8 +600,9 @@ export default function NewTournamentPage() {
               onChange={(e) => setTournamentName(e.target.value)}
               placeholder="ej. Liga MX Jornada 12 · Champions"
               maxLength={60}
+              disabled={!!targetTournament}
               className="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 text-white
-                placeholder-white/25 text-sm focus:outline-none focus:border-amber-500/40"
+                placeholder-white/25 text-sm focus:outline-none focus:border-amber-500/40 disabled:opacity-50"
             />
           </div>
 
@@ -563,8 +615,9 @@ export default function NewTournamentPage() {
               placeholder="Breve descripción del torneo..."
               rows={2}
               maxLength={200}
+              disabled={!!targetTournament}
               className="w-full px-4 py-3 rounded-xl bg-white/5 border border-white/10 text-white
-                placeholder-white/25 text-sm focus:outline-none focus:border-amber-500/40 resize-none"
+                placeholder-white/25 text-sm focus:outline-none focus:border-amber-500/40 resize-none disabled:opacity-50"
             />
           </div>
 
@@ -594,9 +647,17 @@ export default function NewTournamentPage() {
               disabled:opacity-40 disabled:cursor-not-allowed"
           >
             {creating ? (
-              <><Loader2 className="w-5 h-5 animate-spin" /> Creando torneo...</>
+              targetTournament ? (
+                <><Loader2 className="w-5 h-5 animate-spin" /> Agregando partidos...</>
+              ) : (
+                <><Loader2 className="w-5 h-5 animate-spin" /> Creando torneo...</>
+              )
             ) : (
-              <><Plus className="w-5 h-5" /> Crear torneo</>
+              targetTournament ? (
+                <><Plus className="w-5 h-5" /> Agregar partidos al torneo</>
+              ) : (
+                <><Plus className="w-5 h-5" /> Crear torneo</>
+              )
             )}
           </button>
         </div>
