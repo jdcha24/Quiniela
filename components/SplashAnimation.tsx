@@ -60,7 +60,7 @@ export default function SplashAnimation() {
           <img
             src="/logo.svg"
             alt="Quiniela Logo"
-            className="w-full h-full object-contain filter drop-shadow-[0_0_12px_rgba(124,58,237,0.2)]"
+            className="w-full h-full object-contain filter invert drop-shadow-[0_0_12px_rgba(124,58,237,0.2)]"
             draggable={false}
           />
         </div>

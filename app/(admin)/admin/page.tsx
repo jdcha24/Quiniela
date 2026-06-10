@@ -80,6 +80,37 @@ export default function AdminDashboard() {
     }
   };
 
+  const [adminTab, setAdminTab] = useState<"tournaments" | "users">("tournaments");
+  const [globalUsers, setGlobalUsers] = useState<UserDocument[]>([]);
+  const [loadingGlobalUsers, setLoadingGlobalUsers] = useState(false);
+
+  useEffect(() => {
+    if (adminTab === "users") {
+      fetchGlobalUsers();
+    }
+  }, [adminTab]);
+
+  const fetchGlobalUsers = async () => {
+    setLoadingGlobalUsers(true);
+    try {
+      const snap = await getDocs(collection(db, "users"));
+      const list = snap.docs.map((d) => d.data() as UserDocument);
+      list.sort((a, b) => (a.nickname || "").localeCompare(b.nickname || ""));
+      setGlobalUsers(list);
+    } catch (err) {
+      console.error("Error fetching global users:", err);
+    } finally {
+      setLoadingGlobalUsers(false);
+    }
+  };
+
+  const getTournamentNamesForUser = (userActiveIds: string[]) => {
+    if (!userActiveIds || userActiveIds.length === 0) return [];
+    return tournaments
+      .filter((t) => userActiveIds.includes(t.id))
+      .map((t) => t.name);
+  };
+
   const openParticipantsModal = async (tournament: TournamentDocument) => {
     setSelectedTournament(tournament);
     setLoadingUsers(true);
@@ -305,81 +336,187 @@ export default function AdminDashboard() {
         </div>
       )}
 
-      {/* Tournament list */}
-      <div className="space-y-3">
-        <h3 className="text-sm font-bold text-white/50 uppercase tracking-wider">Todos los torneos</h3>
-        {loading ? (
-          <div className="space-y-2">
-            {[1, 2].map((i) => (
-              <div key={i} className="h-28 rounded-2xl bg-white/5 animate-pulse" />
-            ))}
-          </div>
-        ) : tournaments.length === 0 ? (
-          <div className="glass-card rounded-2xl p-8 text-center">
-            <p className="text-white/30 text-sm">Crea tu primer torneo 👆</p>
-          </div>
-        ) : (
-          <div className="space-y-2">
-            {tournaments.map((t) => (
-              <div key={t.id} className="glass-card rounded-2xl p-4 space-y-3">
-                <div className="flex items-start justify-between gap-2">
-                  <div className="flex-1 min-w-0">
-                    <h4 className="font-bold text-white truncate">{t.name}</h4>
-                    <div className="flex items-center gap-3 text-xs text-white/40 mt-1">
-                      <span>{t.matchIds.length} partidos</span>
-                      <span>·</span>
-                      <span className="flex items-center gap-1">
-                        <Users className="w-3 h-3" /> {t.participantCount}
-                      </span>
-                    </div>
-                  </div>
-                  <span className={`text-xs font-bold px-2 py-1 rounded-full border shrink-0 ${statusColor[t.status]}`}>
-                    {t.status === "draft" ? "Borrador" :
-                     t.status === "open" ? "Abierto" :
-                     t.status === "in_progress" ? "En curso" : "Finalizado"}
-                  </span>
-                </div>
-
-                {/* Status controls */}
-                <div className="flex gap-1.5 flex-wrap">
-                  {(["open", "in_progress", "finished"] as const).map((s) => (
-                    <button
-                      key={s}
-                      onClick={() => updateStatus(t.id, s)}
-                      disabled={t.status === s}
-                      className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all ${
-                        t.status === s
-                          ? "bg-white/10 text-white/50 cursor-default"
-                          : "bg-white/5 text-white/50 hover:bg-white/10 hover:text-white active:scale-95"
-                      }`}
-                    >
-                      → {s === "open" ? "Abrir" : s === "in_progress" ? "Iniciar" : "Finalizar"}
-                    </button>
-                  ))}
-                  <Link
-                    href={`/tournament/${t.id}`}
-                    className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-violet-500/10 text-violet-400 hover:bg-violet-500/20 transition-all"
-                  >
-                    Ver →
-                  </Link>
-                  <Link
-                    href={`/admin/tournaments/new?tournamentId=${t.id}`}
-                    className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-amber-500/10 text-amber-400 hover:bg-amber-500/20 transition-all"
-                  >
-                    + Partidos
-                  </Link>
-                  <button
-                    onClick={() => openParticipantsModal(t)}
-                    className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-cyan-500/10 text-cyan-400 hover:bg-cyan-500/20 transition-all active:scale-95"
-                  >
-                    Participantes
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
+      {/* Tab Selector */}
+      <div className="flex border-b border-white/5 gap-4">
+        <button
+          onClick={() => setAdminTab("tournaments")}
+          className={`pb-3 text-sm font-bold border-b-2 transition-all active:scale-95 cursor-pointer ${
+            adminTab === "tournaments"
+              ? "border-amber-500 text-amber-500"
+              : "border-transparent text-white/40 hover:text-white/70"
+          }`}
+        >
+          Gestión de Torneos ({tournaments.length})
+        </button>
+        <button
+          onClick={() => setAdminTab("users")}
+          className={`pb-3 text-sm font-bold border-b-2 transition-all active:scale-95 cursor-pointer ${
+            adminTab === "users"
+              ? "border-amber-500 text-amber-500"
+              : "border-transparent text-white/40 hover:text-white/70"
+          }`}
+        >
+          Lista de Usuarios
+        </button>
       </div>
+
+      {/* Conditional Content */}
+      {adminTab === "tournaments" ? (
+        <div className="space-y-3 animate-fade-in">
+          <h3 className="text-sm font-bold text-white/50 uppercase tracking-wider">Todos los torneos</h3>
+          {loading ? (
+            <div className="space-y-2">
+              {[1, 2].map((i) => (
+                <div key={i} className="h-28 rounded-2xl bg-white/5 animate-pulse" />
+              ))}
+            </div>
+          ) : tournaments.length === 0 ? (
+            <div className="glass-card rounded-2xl p-8 text-center">
+              <p className="text-white/30 text-sm">Crea tu primer torneo 👆</p>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {tournaments.map((t) => (
+                <div key={t.id} className="glass-card rounded-2xl p-4 space-y-3">
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex-1 min-w-0">
+                      <h4 className="font-bold text-white truncate">{t.name}</h4>
+                      <div className="flex items-center gap-3 text-xs text-white/40 mt-1">
+                        <span>{t.matchIds.length} partidos</span>
+                        <span>·</span>
+                        <span className="flex items-center gap-1">
+                          <Users className="w-3 h-3" /> {t.participantCount}
+                        </span>
+                      </div>
+                    </div>
+                    <span className={`text-xs font-bold px-2 py-1 rounded-full border shrink-0 ${statusColor[t.status]}`}>
+                      {t.status === "draft" ? "Borrador" :
+                       t.status === "open" ? "Abierto" :
+                       t.status === "in_progress" ? "En curso" : "Finalizado"}
+                    </span>
+                  </div>
+
+                  {/* Status controls */}
+                  <div className="flex gap-1.5 flex-wrap">
+                    {(["open", "in_progress", "finished"] as const).map((s) => (
+                      <button
+                        key={s}
+                        onClick={() => updateStatus(t.id, s)}
+                        disabled={t.status === s}
+                        className={`px-2.5 py-1 rounded-lg text-xs font-semibold transition-all ${
+                          t.status === s
+                            ? "bg-white/10 text-white/50 cursor-default"
+                            : "bg-white/5 text-white/50 hover:bg-white/10 hover:text-white active:scale-95"
+                        }`}
+                      >
+                        → {s === "open" ? "Abrir" : s === "in_progress" ? "Iniciar" : "Finalizar"}
+                      </button>
+                    ))}
+                    <Link
+                      href={`/tournament/${t.id}`}
+                      className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-violet-500/10 text-violet-400 hover:bg-violet-500/20 transition-all"
+                    >
+                      Ver →
+                    </Link>
+                    <Link
+                      href={`/admin/tournaments/new?tournamentId=${t.id}`}
+                      className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-amber-500/10 text-amber-400 hover:bg-amber-500/20 transition-all"
+                    >
+                      + Partidos
+                    </Link>
+                    <button
+                      onClick={() => openParticipantsModal(t)}
+                      className="px-2.5 py-1 rounded-lg text-xs font-semibold bg-cyan-500/10 text-cyan-400 hover:bg-cyan-500/20 transition-all active:scale-95"
+                    >
+                      Participantes
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      ) : (
+        <div className="space-y-3 animate-fade-in">
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-bold text-white/50 uppercase tracking-wider">Lista global de usuarios</h3>
+            <span className="text-xs text-amber-400 font-semibold">{globalUsers.length} registrados</span>
+          </div>
+          {loadingGlobalUsers ? (
+            <div className="space-y-2">
+              {[1, 2, 3].map((i) => (
+                <div key={i} className="h-20 rounded-2xl bg-white/5 animate-pulse" />
+              ))}
+            </div>
+          ) : globalUsers.length === 0 ? (
+            <div className="glass-card rounded-2xl p-8 text-center">
+              <p className="text-white/30 text-sm">No hay usuarios registrados en la plataforma.</p>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {globalUsers.map((item) => {
+                const userTournaments = getTournamentNamesForUser(item.activeTournamentIds || []);
+                
+                return (
+                  <div key={item.uid} className="glass-card rounded-2xl p-4 flex items-center justify-between gap-3">
+                    <div className="flex items-center gap-3 min-w-0">
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img
+                        src={item.avatarConfig ? getAvatarUrlFromConfig(item.avatarConfig, 40) : `https://api.dicebear.com/9.x/${item.avatarStyle}/svg?seed=${item.avatarSeed}&size=40`}
+                        alt={item.nickname || "Usuario"}
+                        className="w-10 h-10 rounded-xl border border-white/10 bg-surface-2 shrink-0"
+                        style={{
+                          background: item.avatarConfig?.backgroundColor
+                            ? `#${item.avatarConfig.backgroundColor}`
+                            : "#1a1a28",
+                        }}
+                      />
+                      <div className="min-w-0 space-y-1">
+                        <div className="flex items-center gap-2 flex-wrap">
+                          <span className="text-sm font-bold text-white truncate">
+                            {item.nickname || "Sin apodo"}
+                          </span>
+                          {item.role === "admin" && (
+                            <span className="text-[9px] px-1.5 py-0.5 rounded-full bg-amber-500/10 border border-amber-500/30 text-amber-400 font-bold shrink-0">
+                              Admin
+                            </span>
+                          )}
+                        </div>
+                        <div className="text-[10px] text-white/40 truncate">{item.email}</div>
+                        
+                        {/* Tournaments badges */}
+                        <div className="flex flex-wrap gap-1 mt-1">
+                          {userTournaments.length === 0 ? (
+                            <span className="text-[9px] text-white/20 italic">Sin torneos activos</span>
+                          ) : (
+                            userTournaments.map((name) => (
+                              <span
+                                key={name}
+                                className="text-[9px] px-1.5 py-0.5 rounded-md bg-violet-500/10 border border-violet-500/20 text-violet-300 font-semibold"
+                              >
+                                🏆 {name}
+                              </span>
+                            ))
+                          )}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Audit predictions button */}
+                    <button
+                      onClick={() => viewUserPredictions(item)}
+                      className="p-2 rounded-xl bg-white/5 border border-white/10 text-white/70 hover:bg-white/10 hover:text-white transition-all active:scale-90 flex items-center justify-center shrink-0"
+                      title="Auditar pronósticos de este usuario"
+                    >
+                      <Eye className="w-4 h-4" />
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* Manage Participants Modal */}
       {selectedTournament && (

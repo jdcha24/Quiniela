@@ -2,12 +2,13 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { Lock, Loader2, Check, Minus, Plus, Radio, Clock, ChevronDown, ChevronUp } from "lucide-react";
+import { Lock, Loader2, Check, Minus, Plus, Radio, Clock, ChevronDown, ChevronUp, Users } from "lucide-react";
 import { collection, query, where, getDocs, Timestamp } from "firebase/firestore";
 import { db } from "@/lib/firebase/client";
 import { MatchDocument, LeaderboardEntry, PredictionDocument } from "@/types/firestore";
 import { isMatchLocked, formatKickoff } from "@/lib/utils/dates";
 import { getAvatarUrlFromConfig } from "@/lib/utils/dicebear";
+import { useAuth } from "@/lib/hooks/useAuth";
 
 // ─── Score Input Component ────────────────────────────────────────────────────
 function ScoreInput({
@@ -67,6 +68,14 @@ export function MatchCard({
   participants?: LeaderboardEntry[];
   tournamentNames?: string[]; // Optional names of tournaments this match belongs to
 }) {
+  const { userDoc } = useAuth();
+  const isAdmin = userDoc?.role === "admin";
+
+  const [showAdminAudit, setShowAdminAudit] = useState(false);
+  const [auditPredictions, setAuditPredictions] = useState<any[]>([]);
+  const [loadingAudit, setLoadingAudit] = useState(false);
+  const [copiedAudit, setCopiedAudit] = useState(false);
+
   const existing = predictions.get(match.id);
   const [home1, setHome1] = useState(existing?.predictedHome ?? 0);
   const [away1, setAway1] = useState(existing?.predictedAway ?? 0);
@@ -125,6 +134,53 @@ export function MatchCard({
     
     fetchGroupPredictions();
   }, [showGroupPreds, locked, match.id, participants]);
+
+  // Load predictions for administrator audit view
+  useEffect(() => {
+    if (!showAdminAudit || !isAdmin) return;
+
+    const fetchAuditPredictions = async () => {
+      setLoadingAudit(true);
+      try {
+        const q = query(
+          collection(db, "predictions"),
+          where("matchId", "==", match.id)
+        );
+        const snap = await getDocs(q);
+        const preds = snap.docs.map(d => d.data());
+        setAuditPredictions(preds);
+      } catch (err) {
+        console.error("Error fetching audit predictions:", err);
+      } finally {
+        setLoadingAudit(false);
+      }
+    };
+
+    fetchAuditPredictions();
+  }, [showAdminAudit, match.id, isAdmin]);
+
+  const getAuditLists = () => {
+    if (!participants || participants.length === 0) return { ready: [], pending: [] };
+    const predictorIds = new Set(auditPredictions.map(p => p.userId));
+
+    const ready = participants.filter(p => predictorIds.has(p.userId));
+    const pending = participants.filter(p => !predictorIds.has(p.userId));
+
+    return { ready, pending };
+  };
+
+  const { ready: auditReady, pending: auditPending } = getAuditLists();
+
+  const copyReminder = () => {
+    if (auditPending.length === 0) return;
+
+    const namesList = auditPending.map(p => `@${p.nickname || "Jugador"}`).join(", ");
+    const text = `⚠️ *Recordatorio Quiniela* ⚽\n\nFaltan por pronosticar para el partido *${match.homeTeam.name} vs ${match.awayTeam.name}*:\n👉 ${namesList}\n\n¡Tienen hasta antes del inicio para registrar su marcador! ⏳`;
+
+    navigator.clipboard.writeText(text);
+    setCopiedAudit(true);
+    setTimeout(() => setCopiedAudit(false), 2000);
+  };
 
   // Sync state with incoming database updates (e.g. initial load)
   useEffect(() => {
@@ -369,6 +425,91 @@ export function MatchCard({
             </>
           )}
         </button>
+      )}
+
+      {/* Admin Audit Panel */}
+      {isAdmin && (
+        <div className="border-t border-white/5 pt-3 mt-1">
+          <button
+            onClick={() => setShowAdminAudit(!showAdminAudit)}
+            className="w-full flex items-center justify-between text-xs text-amber-400 hover:text-amber-300 font-bold py-1 transition-all"
+          >
+            <span className="flex items-center gap-1">
+              <Users className="w-3.5 h-3.5" />
+              {showAdminAudit ? "Ocultar panel de auditoría" : "Auditar pronósticos del grupo"}
+            </span>
+            {participants && (
+              <span className="text-[10px] bg-amber-500/10 px-2.5 py-0.5 rounded-full border border-amber-500/20 text-amber-300 font-semibold">
+                {participants.length} jug.
+              </span>
+            )}
+          </button>
+
+          {showAdminAudit && (
+            <div className="mt-3 space-y-3 bg-white/[0.02] border border-white/5 rounded-2xl p-3.5 animate-fade-down">
+              {loadingAudit ? (
+                <div className="flex items-center justify-center py-4">
+                  <Loader2 className="w-4 h-4 animate-spin text-amber-400" />
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  <div className="flex items-center justify-between text-xs">
+                    <span className="text-white/40 font-medium">
+                      Progreso: <strong className="text-white">{auditReady.length} / {participants?.length || 0}</strong>
+                    </span>
+                    {auditPending.length > 0 && (
+                      <button
+                        onClick={copyReminder}
+                        className="px-2.5 py-1 rounded-lg text-[10px] font-bold transition-all active:scale-95 flex items-center gap-1
+                          bg-amber-500 text-black hover:bg-amber-400"
+                      >
+                        {copiedAudit ? "¡Copiado! ✓" : "Copiar recordatorio 📋"}
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-3 text-xs">
+                    <div className="space-y-1.5">
+                      <div className="text-[10px] font-bold text-red-400 uppercase tracking-wider">
+                        Pendientes ({auditPending.length})
+                      </div>
+                      <div className="space-y-1 max-h-36 overflow-y-auto pr-1">
+                        {auditPending.length === 0 ? (
+                          <p className="text-[10px] text-emerald-400 italic">¡Todos listos! 🎉</p>
+                        ) : (
+                          auditPending.map(p => (
+                            <div key={p.userId} className="flex items-center gap-1.5 py-0.5 min-w-0">
+                              <div className="w-1.5 h-1.5 rounded-full bg-red-400 shrink-0" />
+                              <span className="text-white/70 font-medium truncate">{p.nickname || "Jugador"}</span>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <div className="text-[10px] font-bold text-emerald-400 uppercase tracking-wider">
+                        Listos ({auditReady.length})
+                      </div>
+                      <div className="space-y-1 max-h-36 overflow-y-auto pr-1">
+                        {auditReady.length === 0 ? (
+                          <p className="text-[10px] text-white/30 italic">Ninguno listo aún</p>
+                        ) : (
+                          auditReady.map(p => (
+                            <div key={p.userId} className="flex items-center gap-1.5 py-0.5 min-w-0">
+                              <div className="w-1.5 h-1.5 rounded-full bg-emerald-400 shrink-0" />
+                              <span className="text-white/70 font-medium truncate">{p.nickname || "Jugador"}</span>
+                            </div>
+                          ))
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
       )}
 
       {/* Group predictions transparent panel (only when locked/started) */}
