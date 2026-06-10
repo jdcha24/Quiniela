@@ -5,7 +5,7 @@ import { verifyAdminSession } from "@/lib/firebase/admin";
 import { db } from "@/lib/firebase/admin";
 import { ApiFixtureResponse } from "@/types/api-football";
 import { mapFixtureToMatch, mapApiStatus } from "@/lib/api-football/mappers";
-import { Timestamp } from "firebase-admin/firestore";
+import { Timestamp, FieldValue } from "firebase-admin/firestore";
 
 export async function POST(req: NextRequest) {
   let adminUid: string;
@@ -64,7 +64,17 @@ export async function POST(req: NextRequest) {
     for (const fixture of fixtures) {
       const matchDoc = mapFixtureToMatch(fixture, tournamentId);
       const matchRef = db.collection("matches").doc(matchDoc.id);
-      batch.set(matchRef, matchDoc, { merge: true });
+      
+      // Omit tournamentIds from mapper and use FieldValue.arrayUnion
+      const { tournamentIds: _, ...rest } = matchDoc as any;
+      batch.set(
+        matchRef,
+        {
+          ...rest,
+          tournamentIds: FieldValue.arrayUnion(tournamentId),
+        },
+        { merge: true }
+      );
     }
 
     await batch.commit();

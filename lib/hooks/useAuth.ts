@@ -8,7 +8,7 @@ import {
   signOut as firebaseSignOut,
   User,
 } from "firebase/auth";
-import { doc, getDoc, setDoc, serverTimestamp } from "firebase/firestore";
+import { doc, getDoc, setDoc, serverTimestamp, onSnapshot } from "firebase/firestore";
 import { auth, db, googleProvider } from "@/lib/firebase/client";
 import { UserDocument } from "@/types/firestore";
 import { useRouter } from "next/navigation";
@@ -35,7 +35,15 @@ export function useAuth(): AuthState & {
   });
 
   useEffect(() => {
-    const unsubscribe = onAuthStateChanged(auth, async (user) => {
+    let unsubscribeDoc: (() => void) | null = null;
+
+    const unsubscribeAuth = onAuthStateChanged(auth, async (user) => {
+      // Clean up any existing document listener first
+      if (unsubscribeDoc) {
+        unsubscribeDoc();
+        unsubscribeDoc = null;
+      }
+
       if (!user) {
         document.cookie = "__session=; path=/; expires=Thu, 01 Jan 1970 00:00:00 GMT; SameSite=Lax; Secure";
         setState({ user: null, userDoc: null, loading: false, isAdmin: false, onboardingComplete: false });
@@ -49,45 +57,40 @@ export function useAuth(): AuthState & {
         document.cookie = `__session=true; path=/; max-age=31536000; SameSite=Lax; Secure`;
       }
 
-      // Fetch user document from Firestore
+      // Live listen to user document in Firestore
       const docRef = doc(db, "users", user.uid);
-      const docSnap = await getDoc(docRef);
-
-      if (docSnap.exists()) {
-        const userDoc = docSnap.data() as UserDocument;
-        setState({
-          user,
-          userDoc,
-          loading: false,
-          isAdmin: userDoc.role === "admin",
-          onboardingComplete: userDoc.onboardingComplete,
-        });
-      } else {
-        // New user — create skeleton document, redirect to onboarding
-        await setDoc(docRef, {
-          uid: user.uid,
-          email: user.email ?? "",
-          nickname: "",
-          avatarSeed: "",
-          avatarStyle: "bottts",
-          role: "user",
-          onboardingComplete: false,
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
-          activeTournamentIds: [],
-        });
-
-        setState({
-          user,
-          userDoc: null,
-          loading: false,
-          isAdmin: false,
-          onboardingComplete: false,
-        });
-      }
+      unsubscribeDoc = onSnapshot(docRef, async (docSnap) => {
+        if (docSnap.exists()) {
+          const userDoc = docSnap.data() as UserDocument;
+          setState({
+            user,
+            userDoc,
+            loading: false,
+            isAdmin: userDoc.role === "admin",
+            onboardingComplete: userDoc.onboardingComplete,
+          });
+        } else {
+          // New user — create skeleton document, redirect to onboarding
+          await setDoc(docRef, {
+            uid: user.uid,
+            email: user.email ?? "",
+            nickname: "",
+            avatarSeed: "",
+            avatarStyle: "bottts",
+            role: "user",
+            onboardingComplete: false,
+            createdAt: serverTimestamp(),
+            updatedAt: serverTimestamp(),
+            activeTournamentIds: [],
+          });
+        }
+      });
     });
 
-    return () => unsubscribe();
+    return () => {
+      unsubscribeAuth();
+      if (unsubscribeDoc) unsubscribeDoc();
+    };
   }, []);
 
   const signInWithGoogle = useCallback(async () => {

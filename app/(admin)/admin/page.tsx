@@ -46,6 +46,58 @@ export default function AdminDashboard() {
     fetchTournaments();
   };
 
+  const [migrating, setMigrating] = useState(false);
+  const [migrationResult, setMigrationResult] = useState<string | null>(null);
+
+  const runMigration = async () => {
+    setMigrating(true);
+    setMigrationResult(null);
+    try {
+      // 1. Migrate Matches (adding tournamentIds array containing tournamentId)
+      const matchesSnap = await getDocs(collection(db, "matches"));
+      let updatedMatches = 0;
+      for (const matchDoc of matchesSnap.docs) {
+        const data = matchDoc.data();
+        if (!data.tournamentIds && data.tournamentId) {
+          await updateDoc(matchDoc.ref, {
+            tournamentIds: [data.tournamentId]
+          });
+          updatedMatches++;
+        }
+      }
+
+      // 2. Migrate Predictions (adding user metadata snapshots)
+      const predictionsSnap = await getDocs(collection(db, "predictions"));
+      const usersSnap = await getDocs(collection(db, "users"));
+      const usersMap = new Map();
+      usersSnap.docs.forEach((u) => usersMap.set(u.id, u.data()));
+
+      let updatedPredictions = 0;
+      for (const predDoc of predictionsSnap.docs) {
+        const data = predDoc.data();
+        if (!data.userNickname && data.userId) {
+          const userProfile = usersMap.get(data.userId);
+          if (userProfile) {
+            await updateDoc(predDoc.ref, {
+              userNickname: userProfile.nickname || "Jugador",
+              userAvatarSeed: userProfile.avatarSeed || "",
+              userAvatarStyle: userProfile.avatarStyle || "bottts",
+              userAvatarConfig: userProfile.avatarConfig || null
+            });
+            updatedPredictions++;
+          }
+        }
+      }
+
+      setMigrationResult(`Migración completada: ${updatedMatches} partidos y ${updatedPredictions} pronósticos actualizados.`);
+    } catch (err) {
+      console.error(err);
+      setMigrationResult("Error al ejecutar la migración.");
+    } finally {
+      setMigrating(false);
+    }
+  };
+
   const statusColor = {
     draft: "text-white/40 bg-white/5 border-white/10",
     open: "text-emerald-400 bg-emerald-500/10 border-emerald-500/30",
@@ -71,27 +123,40 @@ export default function AdminDashboard() {
       </div>
 
       {/* Action buttons */}
-      <div className="flex gap-2">
-        <Link
-          href="/admin/tournaments/new"
-          id="btn-new-tournament"
-          className="flex-1 flex items-center justify-center gap-2 py-3 rounded-xl
-            bg-amber-500 text-black font-bold text-sm hover:bg-amber-400 active:scale-95 transition-all"
-        >
-          <Plus className="w-4 h-4" />
-          Nuevo torneo
-        </Link>
+      <div className="flex flex-col gap-2">
+        <div className="flex gap-2">
+          <Link
+            href="/admin/tournaments/new"
+            id="btn-new-tournament"
+            className="flex-1 flex items-center justify-center gap-2 py-3 rounded-xl
+              bg-amber-500 text-black font-bold text-sm hover:bg-amber-400 active:scale-95 transition-all"
+          >
+            <Plus className="w-4 h-4" />
+            Nuevo torneo
+          </Link>
+
+          <button
+            onClick={triggerSync}
+            disabled={syncing}
+            id="btn-manual-sync"
+            className="flex items-center gap-2 px-4 py-3 rounded-xl
+              bg-white/5 border border-white/10 text-white/70 text-sm font-semibold
+              hover:bg-white/10 active:scale-95 transition-all disabled:opacity-50"
+          >
+            {syncing ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
+            Sync
+          </button>
+        </div>
 
         <button
-          onClick={triggerSync}
-          disabled={syncing}
-          id="btn-manual-sync"
-          className="flex items-center gap-2 px-4 py-3 rounded-xl
-            bg-white/5 border border-white/10 text-white/70 text-sm font-semibold
-            hover:bg-white/10 active:scale-95 transition-all disabled:opacity-50"
+          onClick={runMigration}
+          disabled={migrating}
+          className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl
+            bg-violet-600/20 border border-violet-500/30 text-violet-400 text-xs font-bold
+            hover:bg-violet-600/30 active:scale-95 transition-all disabled:opacity-50 animate-fade-in"
         >
-          {syncing ? <Loader2 className="w-4 h-4 animate-spin" /> : <RefreshCw className="w-4 h-4" />}
-          Sync
+          {migrating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
+          Migrar Datos (Partidos y Pronósticos)
         </button>
       </div>
 
@@ -99,6 +164,13 @@ export default function AdminDashboard() {
       {syncResult && (
         <div className="px-3 py-2 rounded-xl bg-cyan-500/10 border border-cyan-500/30 text-xs text-cyan-400">
           ✓ Sync: {syncResult.synced ?? 0} partidos actualizados, {syncResult.finished ?? 0} finalizados
+        </div>
+      )}
+
+      {/* Migration result */}
+      {migrationResult && (
+        <div className="px-3 py-2 rounded-xl bg-violet-500/10 border border-violet-500/30 text-xs text-violet-400 animate-fade-in">
+          {migrationResult}
         </div>
       )}
 

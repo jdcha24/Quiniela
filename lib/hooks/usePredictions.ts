@@ -59,6 +59,12 @@ export function usePredictions(
         homeTeamName: string;
         awayTeamName: string;
         kickoffTime: Timestamp;
+      },
+      userMeta: {
+        nickname: string;
+        avatarSeed: string;
+        avatarStyle: string;
+        avatarConfig?: any;
       }
     ) => {
       if (!userId) return;
@@ -83,6 +89,10 @@ export function usePredictions(
             predictedHome2,
             predictedAway2,
             updatedAt: now,
+            userNickname: userMeta.nickname,
+            userAvatarSeed: userMeta.avatarSeed,
+            userAvatarStyle: userMeta.avatarStyle,
+            userAvatarConfig: userMeta.avatarConfig || null,
             ...(!existing && {
               submittedAt: now,
               pointsEarned: null,

@@ -14,6 +14,7 @@ export function mapFixtureToMatch(
     id: String(fixture.fixture.id),
     fixtureId: fixture.fixture.id,
     tournamentId,
+    tournamentIds: [tournamentId],
     leagueId: fixture.league.id,
     leagueName: fixture.league.name,
     leagueLogo: fixture.league.logo,

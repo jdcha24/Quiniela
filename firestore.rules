@@ -63,8 +63,11 @@ service cloud.firestore {
 
     // ── Predictions ───────────────────────────────────────────────────────────
     match /predictions/{predictionId} {
-      // Users can only read their own predictions
-      allow read: if isAuth() && resource.data.userId == request.auth.uid;
+      // Users can only read their own predictions, OR anyone can read if the match has started/locked
+      allow read: if isAuth() && (
+        resource.data.userId == request.auth.uid ||
+        !matchNotStarted(resource.data.matchId)
+      );
 
       // Create: user owns it, match not started, correct ID format
       allow create: if isAuth() &&

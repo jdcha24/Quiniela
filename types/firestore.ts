@@ -95,7 +95,8 @@ export interface FinalScore {
 export interface MatchDocument {
   id: string;
   fixtureId: number;
-  tournamentId: string;
+  tournamentId?: string; // Optional for backward compatibility
+  tournamentIds: string[]; // List of tournaments sharing this match
   leagueId: number;
   leagueName: string;
   leagueLogo: string;
@@ -132,6 +133,11 @@ export interface PredictionDocument {
   homeTeamName: string;
   awayTeamName: string;
   kickoffTime: Timestamp;
+  // User profile snapshot (for transparent, efficient leaderboard viewing)
+  userNickname?: string;
+  userAvatarSeed?: string;
+  userAvatarStyle?: string;
+  userAvatarConfig?: AvatarConfig;
 }
 
 // ─── API Meta ─────────────────────────────────────────────────────────────────
