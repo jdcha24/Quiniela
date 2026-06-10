@@ -15,27 +15,36 @@ export default function DashboardPage() {
   const [tournaments, setTournaments] = useState<TournamentDocument[]>([]);
   const [myStats, setMyStats] = useState<Map<string, LeaderboardEntry>>(new Map());
   const [loading, setLoading] = useState(true);
-  const [joining, setJoining] = useState<string | null>(null);
 
   useEffect(() => {
     if (!user) return;
     fetchTournaments();
-  }, [user]);
+  }, [user, userDoc?.activeTournamentIds]);
 
   const fetchTournaments = async () => {
+    if (!userDoc?.activeTournamentIds || userDoc.activeTournamentIds.length === 0) {
+      setTournaments([]);
+      setMyStats(new Map());
+      setLoading(false);
+      return;
+    }
+
     const q = query(
       collection(db, "tournaments"),
       where("status", "in", ["open", "in_progress"])
     );
     const snap = await getDocs(q);
-    const docs = snap.docs.map((d) => ({ id: d.id, ...d.data() } as TournamentDocument));
+    const docs = snap.docs
+      .map((d) => ({ id: d.id, ...d.data() } as TournamentDocument))
+      .filter((t) => userDoc.activeTournamentIds.includes(t.id));
+      
     setTournaments(docs);
 
     // Fetch my leaderboard entries for each tournament
     const statsMap = new Map<string, LeaderboardEntry>();
     await Promise.all(
       docs.map(async (t) => {
-        if (user && userDoc?.activeTournamentIds?.includes(t.id)) {
+        if (user) {
           const entryDoc = await getDocs(
             query(collection(db, "tournaments", t.id, "leaderboard"), where("userId", "==", user.uid))
           );
@@ -48,50 +57,6 @@ export default function DashboardPage() {
     setMyStats(statsMap);
     setLoading(false);
   };
-
-  const joinTournament = async (tournamentId: string) => {
-    if (!user || !userDoc) return;
-    setJoining(tournamentId);
-
-    // Add user to leaderboard subcollection
-    const leaderboardRef = doc(db, "tournaments", tournamentId, "leaderboard", user.uid);
-    await setDoc(leaderboardRef, {
-      userId: user.uid,
-      nickname: userDoc.nickname,
-      avatarSeed: userDoc.avatarSeed,
-      avatarStyle: userDoc.avatarStyle,
-      avatarConfig: userDoc.avatarConfig || null,
-      totalPoints: 0,
-      exactScores: 0,
-      correctResults: 0,
-      predictions: 0,
-      rank: 999,
-      lastUpdated: serverTimestamp(),
-      projectedPoints: 0,
-      projectedRank: 999,
-    });
-
-    // Update user's activeTournamentIds
-    await updateDoc(doc(db, "users", user.uid), {
-      activeTournamentIds: arrayUnion(tournamentId),
-      updatedAt: serverTimestamp(),
-    });
-
-    // Update tournament participant count
-    const tournamentRef = doc(db, "tournaments", tournamentId);
-    const t = tournaments.find((t) => t.id === tournamentId);
-    if (t) {
-      await updateDoc(tournamentRef, {
-        participantCount: (t.participantCount || 0) + 1,
-      });
-    }
-
-    setJoining(null);
-    fetchTournaments(); // refresh
-  };
-
-  const isJoined = (tournamentId: string) =>
-    userDoc?.activeTournamentIds?.includes(tournamentId) ?? false;
 
   return (
     <div className="px-4 py-6 space-y-6 animate-fade-up">
@@ -108,20 +73,20 @@ export default function DashboardPage() {
       {myStats.size > 0 && (
         <div className="grid grid-cols-3 gap-3">
           {[...myStats.values()].slice(0, 1).map((entry) => (
-            <>
-              <div key="rank" className="glass-card rounded-2xl p-3 text-center">
+            <div key={entry.userId} className="contents">
+              <div className="glass-card rounded-2xl p-3 text-center">
                 <div className="rank-gold text-2xl font-black">#{entry.rank}</div>
                 <div className="text-xs text-white/40 mt-1">Posición</div>
               </div>
-              <div key="pts" className="glass-card rounded-2xl p-3 text-center">
+              <div className="glass-card rounded-2xl p-3 text-center">
                 <div className="text-2xl font-black text-violet-400">{entry.totalPoints}</div>
                 <div className="text-xs text-white/40 mt-1">Puntos</div>
               </div>
-              <div key="exact" className="glass-card rounded-2xl p-3 text-center">
+              <div className="glass-card rounded-2xl p-3 text-center">
                 <div className="text-2xl font-black text-emerald-400">{entry.exactScores}</div>
                 <div className="text-xs text-white/40 mt-1">Exactos</div>
               </div>
-            </>
+            </div>
           ))}
         </div>
       )}
@@ -130,9 +95,9 @@ export default function DashboardPage() {
       <div className="space-y-3">
         <div className="flex items-center justify-between">
           <h3 className="font-bold text-white/80 text-sm uppercase tracking-wider">
-            Torneos activos
+            Mis torneos activos
           </h3>
-          <span className="text-xs text-violet-400 font-semibold">{tournaments.length} disponibles</span>
+          <span className="text-xs text-violet-400 font-semibold">{tournaments.length} asignados</span>
         </div>
 
         {loading ? (
@@ -144,14 +109,13 @@ export default function DashboardPage() {
           </div>
         ) : tournaments.length === 0 ? (
           <div className="glass-card rounded-2xl p-8 text-center space-y-2">
-            <Calendar className="w-10 h-10 text-white/20 mx-auto" />
-            <p className="text-white/40 text-sm">No hay torneos activos.</p>
-            <p className="text-white/25 text-xs">El admin creará uno pronto.</p>
+            <Trophy className="w-10 h-10 text-white/20 mx-auto" />
+            <p className="text-white/40 text-sm">No estás asignado a ningún torneo activo.</p>
+            <p className="text-white/25 text-xs">Pídele al administrador que te asigne a un torneo.</p>
           </div>
         ) : (
           <div className="space-y-3">
             {tournaments.map((tournament) => {
-              const joined = isJoined(tournament.id);
               const stats = myStats.get(tournament.id);
 
               return (
@@ -200,8 +164,8 @@ export default function DashboardPage() {
                     </div>
                   </div>
 
-                  {/* My stats if joined */}
-                  {joined && stats && (
+                  {/* My stats */}
+                  {stats && (
                     <div className="flex items-center gap-2 px-3 py-2 rounded-xl bg-violet-500/10 border border-violet-500/20">
                       <span className="text-sm font-black rank-gold">#{stats.rank}</span>
                       <span className="text-xs text-white/50">·</span>
@@ -212,34 +176,16 @@ export default function DashboardPage() {
                   )}
 
                   {/* CTA */}
-                  {joined ? (
-                    <Link
-                      href={`/tournament/${tournament.id}`}
-                      id={`btn-enter-tournament-${tournament.id}`}
-                      className="flex items-center justify-center gap-2 w-full py-3 rounded-xl
-                        bg-gradient-to-r from-violet-600 to-purple-600 font-bold text-white text-sm
-                        hover:from-violet-500 hover:to-purple-500 active:scale-95 transition-all"
-                    >
-                      Ver mis pronósticos
-                      <ArrowRight className="w-4 h-4" />
-                    </Link>
-                  ) : (
-                    <button
-                      onClick={() => joinTournament(tournament.id)}
-                      disabled={joining === tournament.id}
-                      id={`btn-join-tournament-${tournament.id}`}
-                      className="flex items-center justify-center gap-2 w-full py-3 rounded-xl
-                        bg-white/5 border border-white/10 font-bold text-white/80 text-sm
-                        hover:bg-white/10 active:scale-95 transition-all disabled:opacity-50"
-                    >
-                      {joining === tournament.id ? (
-                        <div className="w-4 h-4 rounded-full border-2 border-white/50 border-t-transparent animate-spin" />
-                      ) : (
-                        <Plus className="w-4 h-4" />
-                      )}
-                      Unirme al torneo
-                    </button>
-                  )}
+                  <Link
+                    href={`/tournament/${tournament.id}`}
+                    id={`btn-enter-tournament-${tournament.id}`}
+                    className="flex items-center justify-center gap-2 w-full py-3 rounded-xl
+                      bg-gradient-to-r from-violet-600 to-purple-600 font-bold text-white text-sm
+                      hover:from-violet-500 hover:to-purple-500 active:scale-95 transition-all"
+                  >
+                    Ver mis pronósticos
+                    <ArrowRight className="w-4 h-4" />
+                  </Link>
                 </div>
               );
             })}
