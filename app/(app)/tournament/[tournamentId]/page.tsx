@@ -74,7 +74,6 @@ export default function TournamentPage() {
             key={m.id}
             match={m}
             userId={user?.uid ?? ""}
-            tournamentId={tournamentId}
             predictions={predictions}
             saving={saving}
             onSave={handleSave}
