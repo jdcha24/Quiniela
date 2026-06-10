@@ -6,7 +6,7 @@ import { collection, getDocs, query, where, orderBy, doc, updateDoc, deleteDoc, 
 import { db } from "@/lib/firebase/client";
 import { useAuth } from "@/lib/hooks/useAuth";
 import { TournamentDocument, UserDocument } from "@/types/firestore";
-import { Plus, BarChart3, Users, Calendar, CheckCircle, RefreshCw, Loader2, X } from "lucide-react";
+import { Plus, BarChart3, Users, Calendar, CheckCircle, RefreshCw, Loader2, X, Eye } from "lucide-react";
 import Link from "next/link";
 import { getAvatarUrlFromConfig } from "@/lib/utils/dicebear";
 
@@ -51,6 +51,34 @@ export default function AdminDashboard() {
   const [systemUsers, setSystemUsers] = useState<UserDocument[]>([]);
   const [loadingUsers, setLoadingUsers] = useState(false);
   const [togglingUser, setTogglingUser] = useState<string | null>(null);
+
+  const [selectedUserForPredictions, setSelectedUserForPredictions] = useState<UserDocument | null>(null);
+  const [userPredictions, setUserPredictions] = useState<any[]>([]);
+  const [loadingUserPredictions, setLoadingUserPredictions] = useState(false);
+
+  const viewUserPredictions = async (targetUser: UserDocument) => {
+    setSelectedUserForPredictions(targetUser);
+    setLoadingUserPredictions(true);
+    try {
+      const q = query(
+        collection(db, "predictions"),
+        where("userId", "==", targetUser.uid)
+      );
+      const snap = await getDocs(q);
+      const list = snap.docs.map((d) => d.data());
+      // Sort by kickoffTime descending (most recent first)
+      list.sort((a, b) => {
+        const timeA = a.kickoffTime?.seconds || 0;
+        const timeB = b.kickoffTime?.seconds || 0;
+        return timeB - timeA;
+      });
+      setUserPredictions(list);
+    } catch (err) {
+      console.error("Error loading user predictions:", err);
+    } finally {
+      setLoadingUserPredictions(false);
+    }
+  };
 
   const openParticipantsModal = async (tournament: TournamentDocument) => {
     setSelectedTournament(tournament);
@@ -410,23 +438,32 @@ export default function AdminDashboard() {
                         </div>
                       </div>
 
-                      <button
-                        onClick={() => toggleParticipant(item)}
-                        disabled={isToggling}
-                        className={`px-3 py-1.5 rounded-xl font-bold text-xs transition-all active:scale-95 flex items-center gap-1.5 shrink-0 ${
-                          isParticipant
-                            ? "bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20"
-                            : "bg-white/5 border border-white/10 text-white/70 hover:bg-white/10"
-                        }`}
-                      >
-                        {isToggling ? (
-                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                        ) : isParticipant ? (
-                          <>Asignado ✓</>
-                        ) : (
-                          <>Asignar</>
-                        )}
-                      </button>
+                      <div className="flex items-center gap-2 shrink-0">
+                        <button
+                          onClick={() => viewUserPredictions(item)}
+                          className="p-1.5 rounded-xl bg-white/5 border border-white/10 text-white/70 hover:bg-white/10 hover:text-white transition-all active:scale-90 flex items-center justify-center shrink-0"
+                          title="Ver pronósticos del usuario"
+                        >
+                          <Eye className="w-3.5 h-3.5" />
+                        </button>
+                        <button
+                          onClick={() => toggleParticipant(item)}
+                          disabled={isToggling}
+                          className={`px-3 py-1.5 rounded-xl font-bold text-xs transition-all active:scale-95 flex items-center gap-1.5 shrink-0 ${
+                            isParticipant
+                              ? "bg-emerald-500/10 border border-emerald-500/30 text-emerald-400 hover:bg-emerald-500/20"
+                              : "bg-white/5 border border-white/10 text-white/70 hover:bg-white/10"
+                          }`}
+                        >
+                          {isToggling ? (
+                            <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                          ) : isParticipant ? (
+                            <>Asignado ✓</>
+                          ) : (
+                            <>Asignar</>
+                          )}
+                        </button>
+                      </div>
                     </div>
                   );
                 })
@@ -439,6 +476,163 @@ export default function AdminDashboard() {
                 className="px-4 py-2 rounded-xl bg-white/5 border border-white/10 text-white/70 text-xs font-bold hover:bg-white/10 transition-all active:scale-95"
               >
                 Cerrar
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* User Predictions Audit Modal */}
+      {selectedUserForPredictions && (
+        <div className="fixed inset-0 z-[60] bg-black/70 backdrop-blur-md flex items-center justify-center p-4 animate-fade-in">
+          <div className="glass-card w-full max-w-lg rounded-3xl p-6 space-y-4 border border-white/10 shadow-2xl relative animate-scale-up max-h-[85vh] flex flex-col">
+            <button
+              onClick={() => {
+                setSelectedUserForPredictions(null);
+                setUserPredictions([]);
+              }}
+              className="absolute top-4 right-4 w-8 h-8 rounded-full bg-white/5 border border-white/10 flex items-center justify-center hover:bg-white/10 transition-all active:scale-90"
+            >
+              <X className="w-4 h-4 text-white/70" />
+            </button>
+
+            <div className="flex items-center gap-3 border-b border-white/5 pb-3 shrink-0">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={selectedUserForPredictions.avatarConfig ? getAvatarUrlFromConfig(selectedUserForPredictions.avatarConfig, 40) : `https://api.dicebear.com/9.x/${selectedUserForPredictions.avatarStyle}/svg?seed=${selectedUserForPredictions.avatarSeed}&size=40`}
+                alt={selectedUserForPredictions.nickname}
+                className="w-10 h-10 rounded-xl border border-white/10 bg-surface-2 shrink-0"
+                style={{
+                  background: selectedUserForPredictions.avatarConfig?.backgroundColor
+                    ? `#${selectedUserForPredictions.avatarConfig.backgroundColor}`
+                    : "#1a1a28",
+                }}
+              />
+              <div className="min-w-0">
+                <h3 className="text-base font-black text-white truncate flex items-center gap-1.5">
+                  Pronósticos de {selectedUserForPredictions.nickname || "Usuario"}
+                </h3>
+                <p className="text-xs text-white/40 font-medium truncate">
+                  {selectedUserForPredictions.email}
+                </p>
+              </div>
+            </div>
+
+            <div className="flex-1 overflow-y-auto pr-1 space-y-3 min-h-0">
+              {loadingUserPredictions ? (
+                <div className="flex flex-col items-center justify-center py-20 gap-2">
+                  <Loader2 className="w-6 h-6 animate-spin text-amber-500" />
+                  <span className="text-xs text-white/40">Cargando pronósticos...</span>
+                </div>
+              ) : userPredictions.length === 0 ? (
+                <div className="text-center py-16 text-white/30 text-xs italic space-y-2">
+                  <p>Este usuario no tiene pronósticos registrados en la plataforma.</p>
+                </div>
+              ) : (
+                userPredictions.map((pred) => {
+                  const isEval = pred.pointsEarned !== null && pred.pointsEarned !== undefined;
+                  const pts = pred.pointsEarned ?? 0;
+                  
+                  const p1Earned = pred.pointsEarned1 !== undefined && pred.pointsEarned1 !== null;
+                  const p2Earned = pred.pointsEarned2 !== undefined && pred.pointsEarned2 !== null;
+
+                  const pColor = (points: number | null) => {
+                    if (points === 3) return "text-emerald-400 border-emerald-500/30 bg-emerald-500/10";
+                    if (points === 1) return "text-amber-400 border-amber-500/30 bg-amber-500/10";
+                    return "text-red-400 border-red-500/30 bg-red-500/10";
+                  };
+
+                  return (
+                    <div
+                      key={pred.id}
+                      className="p-3.5 rounded-2xl bg-white/3 border border-white/5 hover:bg-white/5 transition-all space-y-2.5"
+                    >
+                      {/* Match Info & Status */}
+                      <div className="flex items-center justify-between text-[10px] text-white/40 font-medium">
+                        <span className="truncate">{pred.homeTeamName} vs {pred.awayTeamName}</span>
+                        <span className="shrink-0 font-semibold text-white/30">
+                          {pred.kickoffTime ? new Date(pred.kickoffTime.seconds * 1000).toLocaleDateString("es-MX", {
+                            day: "numeric",
+                            month: "short",
+                            hour: "2-digit",
+                            minute: "2-digit"
+                          }) : ""}
+                        </span>
+                      </div>
+
+                      {/* Teams & Real result */}
+                      <div className="flex items-center justify-between">
+                        <div className="text-xs font-bold text-white max-w-[40%] truncate">{pred.homeTeamName}</div>
+                        
+                        <div className="flex items-center gap-1.5 px-2.5 py-1 rounded-xl bg-white/5 border border-white/10 text-white/80 font-black text-sm">
+                          {/* We show status label if evaluated */}
+                          {isEval ? (
+                            <span>Evaluado</span>
+                          ) : (
+                            <span className="text-[10px] font-normal text-white/40">Sin evaluar</span>
+                          )}
+                        </div>
+
+                        <div className="text-xs font-bold text-white max-w-[40%] truncate text-right">{pred.awayTeamName}</div>
+                      </div>
+
+                      {/* Forecasts block */}
+                      <div className="flex items-center justify-between gap-2 border-t border-white/5 pt-2 flex-wrap">
+                        <div className="flex gap-2">
+                          <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-xs font-semibold ${
+                            p1Earned ? pColor(pred.pointsEarned1) : "bg-white/5 border-white/10 text-white/70"
+                          }`}>
+                            <span className="text-[10px] text-violet-400 font-bold">1:</span>
+                            <span className="font-black">{pred.predictedHome} - {pred.predictedAway}</span>
+                            {p1Earned && <span className="text-[9px]">({pred.pointsEarned1} pts)</span>}
+                          </div>
+                          
+                          {pred.predictedHome2 !== null && pred.predictedHome2 !== undefined && (
+                            <div className={`flex items-center gap-1.5 px-2.5 py-1 rounded-lg border text-xs font-semibold ${
+                              p2Earned ? pColor(pred.pointsEarned2) : "bg-cyan-500/5 border-cyan-500/10 text-cyan-300"
+                            }`}>
+                              <span className="text-[10px] text-cyan-400 font-bold">2:</span>
+                              <span className="font-black">{pred.predictedHome2} - {pred.predictedAway2}</span>
+                              {p2Earned && <span className="text-[9px]">({pred.pointsEarned2} pts)</span>}
+                            </div>
+                          )}
+                        </div>
+
+                        {isEval ? (
+                          <span className={`text-xs font-black px-2.5 py-1 rounded-full border ${
+                            pts === 3 ? "text-emerald-400 bg-emerald-500/10 border-emerald-500/30" :
+                            pts === 1 ? "text-amber-400 bg-amber-500/10 border-amber-500/30" : "text-red-400 bg-red-500/10 border-red-500/30"
+                          }`}>
+                            +{pts} pts
+                          </span>
+                        ) : (
+                          <span className="text-[10px] text-white/30 italic">Pendiente</span>
+                        )}
+                      </div>
+
+                      <div className="text-[9px] text-white/30 text-right">
+                        Registrado: {pred.updatedAt ? new Date(pred.updatedAt.seconds * 1000).toLocaleString("es-MX", {
+                          day: "numeric",
+                          month: "short",
+                          hour: "2-digit",
+                          minute: "2-digit"
+                        }) : ""}
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            <div className="border-t border-white/5 pt-3 flex justify-end shrink-0">
+              <button
+                onClick={() => {
+                  setSelectedUserForPredictions(null);
+                  setUserPredictions([]);
+                }}
+                className="px-4 py-2 rounded-xl bg-white/5 border border-white/10 text-white/70 text-xs font-bold hover:bg-white/10 transition-all active:scale-95"
+              >
+                Regresar
               </button>
             </div>
           </div>
