@@ -3,11 +3,11 @@
 
 import { useState, useEffect } from "react";
 import { Lock, Loader2, Check, Minus, Plus, Radio, Clock, ChevronDown, ChevronUp } from "lucide-react";
-import { collection, query, where, getDocs, Timestamp } from "firebase/firestore";
-import { db } from "@/lib/firebase/client";
+import { Timestamp } from "firebase/firestore";
 import { MatchDocument, LeaderboardEntry, PredictionDocument } from "@/types/firestore";
 import { isMatchLocked, formatKickoff } from "@/lib/utils/dates";
 import { getAvatarUrlFromConfig } from "@/lib/utils/dicebear";
+import { mockGroupPredictions } from "@/lib/mockData";
 
 // ─── Score Input Component ────────────────────────────────────────────────────
 function ScoreInput({
@@ -89,41 +89,41 @@ export function MatchCard({
   useEffect(() => {
     if (!showGroupPreds || !locked) return;
     
-    const fetchGroupPredictions = async () => {
+    const fetchGroupPredictions = () => {
       setLoadingGroup(true);
-      try {
-        const q = query(
-          collection(db, "predictions"),
-          where("matchId", "==", match.id)
-        );
-        const snap = await getDocs(q);
-        const preds = snap.docs.map(d => d.data());
-        
-        let list = preds;
-        if (participants && participants.length > 0) {
-          const participantIds = new Set(participants.map(p => p.userId));
-          list = preds.filter(p => participantIds.has(p.userId));
-        }
-        
-        list.sort((a, b) => {
-          const pointsA = a.pointsEarned ?? -1;
-          const pointsB = b.pointsEarned ?? -1;
-          if (pointsB !== pointsA) return pointsB - pointsA;
+      const timer = setTimeout(() => {
+        try {
+          const preds = mockGroupPredictions[match.id] || [];
           
-          const nameA = a.userNickname || "";
-          const nameB = b.userNickname || "";
-          return nameA.localeCompare(nameB);
-        });
+          let list = [...preds];
+          if (participants && participants.length > 0) {
+            const participantIds = new Set(participants.map(p => p.userId));
+            list = preds.filter(p => participantIds.has(p.userId));
+          }
+          
+          list.sort((a, b) => {
+            const pointsA = a.pointsEarned ?? -1;
+            const pointsB = b.pointsEarned ?? -1;
+            if (pointsB !== pointsA) return pointsB - pointsA;
+            
+            const nameA = a.userNickname || "";
+            const nameB = b.userNickname || "";
+            return nameA.localeCompare(nameB);
+          });
 
-        setGroupPredictions(list);
-      } catch (err) {
-        console.error("Error fetching group predictions:", err);
-      } finally {
-        setLoadingGroup(false);
-      }
+          setGroupPredictions(list);
+        } catch (err) {
+          console.error("Error loading mock group predictions:", err);
+        } finally {
+          setLoadingGroup(false);
+        }
+      }, 200);
+
+      return () => clearTimeout(timer);
     };
     
-    fetchGroupPredictions();
+    const cleanup = fetchGroupPredictions();
+    return cleanup;
   }, [showGroupPreds, locked, match.id, participants]);
 
   // Sync state with incoming database updates (e.g. initial load)

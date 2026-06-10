@@ -2,14 +2,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import {
-  collection,
-  onSnapshot,
-  query,
-  where,
-} from "firebase/firestore";
-import { db } from "@/lib/firebase/client";
 import { MatchDocument } from "@/types/firestore";
+import { mockMatches } from "@/lib/mockData";
 
 export function useLiveMatches(tournamentIdOrIds: string | string[] | null) {
   const [matches, setMatches] = useState<MatchDocument[]>([]);
@@ -22,35 +16,35 @@ export function useLiveMatches(tournamentIdOrIds: string | string[] | null) {
       return;
     }
 
-    let q;
-    if (Array.isArray(tournamentIdOrIds)) {
-      // Chunk to max 30 items for array-contains-any
-      const chunk = tournamentIdOrIds.slice(0, 30);
-      q = query(
-        collection(db, "matches"),
-        where("tournamentIds", "array-contains-any", chunk)
-      );
-    } else {
-      q = query(
-        collection(db, "matches"),
-        where("tournamentIds", "array-contains", tournamentIdOrIds)
-      );
-    }
+    setLoading(true);
+    const timer = setTimeout(() => {
+      let filtered: MatchDocument[] = [];
 
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const data = snapshot.docs.map((doc) => doc.data() as MatchDocument);
+      if (Array.isArray(tournamentIdOrIds)) {
+        const idsSet = new Set(tournamentIdOrIds);
+        filtered = mockMatches.filter((match) =>
+          match.tournamentIds.some((tId) => idsSet.has(tId))
+        );
+      } else {
+        filtered = mockMatches.filter((match) =>
+          match.tournamentIds.includes(tournamentIdOrIds)
+        );
+      }
+
       // Sort chronologically by kickoffTime (ascending)
-      data.sort((a, b) => {
+      filtered.sort((a, b) => {
         const timeA = a.kickoffTime?.seconds || 0;
         const timeB = b.kickoffTime?.seconds || 0;
         return timeA - timeB;
       });
-      setMatches(data);
-      setLoading(false);
-    });
 
-    return () => unsubscribe();
+      setMatches(filtered);
+      setLoading(false);
+    }, 300);
+
+    return () => clearTimeout(timer);
   }, [tournamentIdOrIds]);
 
   return { matches, loading };
 }
+

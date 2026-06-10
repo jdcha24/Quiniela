@@ -2,14 +2,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import {
-  collection,
-  onSnapshot,
-  orderBy,
-  query,
-} from "firebase/firestore";
-import { db } from "@/lib/firebase/client";
 import { LeaderboardEntry } from "@/types/firestore";
+import { mockLeaderboard } from "@/lib/mockData";
 
 export function useLeaderboard(tournamentId: string | null) {
   const [entries, setEntries] = useState<LeaderboardEntry[]>([]);
@@ -17,23 +11,22 @@ export function useLeaderboard(tournamentId: string | null) {
 
   useEffect(() => {
     if (!tournamentId) {
+      setEntries([]);
       setLoading(false);
       return;
     }
 
-    const q = query(
-      collection(db, "tournaments", tournamentId, "leaderboard"),
-      orderBy("totalPoints", "desc")
-    );
-
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const data = snapshot.docs.map((doc) => doc.data() as LeaderboardEntry);
-      setEntries(data);
+    setLoading(true);
+    const timer = setTimeout(() => {
+      // Sort in descending order just in case
+      const sorted = [...mockLeaderboard].sort((a, b) => b.totalPoints - a.totalPoints);
+      setEntries(sorted);
       setLoading(false);
-    });
+    }, 300);
 
-    return () => unsubscribe();
+    return () => clearTimeout(timer);
   }, [tournamentId]);
 
   return { entries, loading };
 }
+

@@ -2,50 +2,30 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
-import {
-  collection,
-  query,
-  where,
-  onSnapshot,
-  doc,
-  setDoc,
-  serverTimestamp,
-  Timestamp,
-} from "firebase/firestore";
-import { db } from "@/lib/firebase/client";
 import { PredictionDocument } from "@/types/firestore";
+import { mockUserPredictions } from "@/lib/mockData";
+import { Timestamp } from "firebase/firestore";
 
-export function usePredictions(
-  userId: string | null
-) {
-  const [predictions, setPredictions] = useState<
-    Map<string, PredictionDocument>
-  >(new Map());
+export function usePredictions(userId: string | null) {
+  const [predictions, setPredictions] = useState<Map<string, PredictionDocument>>(new Map());
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState<string | null>(null); // matchId being saved
 
   useEffect(() => {
     if (!userId) {
+      setPredictions(new Map());
       setLoading(false);
       return;
     }
 
-    const q = query(
-      collection(db, "predictions"),
-      where("userId", "==", userId)
-    );
-
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      const map = new Map<string, PredictionDocument>();
-      snapshot.docs.forEach((d) => {
-        const pred = d.data() as PredictionDocument;
-        map.set(pred.matchId, pred);
-      });
-      setPredictions(map);
+    setLoading(true);
+    const timer = setTimeout(() => {
+      // Create a fresh copy of mockUserPredictions
+      setPredictions(new Map(mockUserPredictions));
       setLoading(false);
-    });
+    }, 300);
 
-    return () => unsubscribe();
+    return () => clearTimeout(timer);
   }, [userId]);
 
   const savePrediction = useCallback(
@@ -69,47 +49,50 @@ export function usePredictions(
     ) => {
       if (!userId) return;
 
-      const docId = `${userId}_${matchId}`;
-      const docRef = doc(db, "predictions", docId);
       setSaving(matchId);
 
-      try {
-        const existing = predictions.get(matchId);
-        const now = serverTimestamp();
+      // Simulate a small network save delay (600ms)
+      await new Promise((resolve) => setTimeout(resolve, 600));
 
-        await setDoc(
-          docRef,
-          {
-            id: docId,
-            userId,
-            matchId,
-            tournamentId: "global",
-            predictedHome,
-            predictedAway,
-            predictedHome2,
-            predictedAway2,
-            updatedAt: now,
-            userNickname: userMeta.nickname,
-            userAvatarSeed: userMeta.avatarSeed,
-            userAvatarStyle: userMeta.avatarStyle,
-            userAvatarConfig: userMeta.avatarConfig || null,
-            ...(!existing && {
-              submittedAt: now,
-              pointsEarned: null,
-              pointsEarned1: null,
-              pointsEarned2: null,
-              evaluatedAt: null,
-              ...matchMeta,
-            }),
-          },
-          { merge: true }
-        );
-      } finally {
-        setSaving(null);
-      }
+      const docId = `${userId}_${matchId}`;
+      const now = Timestamp.fromDate(new Date());
+
+      setPredictions((prev) => {
+        const next = new Map(prev);
+        const existing = next.get(matchId);
+
+        next.set(matchId, {
+          id: docId,
+          userId,
+          matchId,
+          tournamentId: "global",
+          predictedHome,
+          predictedAway,
+          predictedHome2,
+          predictedAway2,
+          updatedAt: now,
+          userNickname: userMeta.nickname,
+          userAvatarSeed: userMeta.avatarSeed,
+          userAvatarStyle: userMeta.avatarStyle,
+          userAvatarConfig: userMeta.avatarConfig || null,
+          submittedAt: existing?.submittedAt || now,
+          pointsEarned: existing?.pointsEarned ?? null,
+          pointsEarned1: existing?.pointsEarned1 ?? null,
+          pointsEarned2: existing?.pointsEarned2 ?? null,
+          evaluatedAt: existing?.evaluatedAt ?? null,
+          homeTeamName: matchMeta.homeTeamName,
+          awayTeamName: matchMeta.awayTeamName,
+          kickoffTime: matchMeta.kickoffTime,
+        });
+
+        return next;
+      });
+
+      setSaving(null);
     },
-    [userId, predictions]
+    [userId]
   );
 
   return { predictions, loading, saving, savePrediction };
 }
+
