@@ -268,7 +268,8 @@ export default function AdminDashboard() {
   };
 
   return (
-    <div className="px-4 py-5 space-y-5 animate-fade-up">
+    <>
+      <div className="px-4 py-5 space-y-5 animate-fade-up">
       {/* Stats row */}
       <div className="grid grid-cols-3 gap-3">
         {[
@@ -517,6 +518,7 @@ export default function AdminDashboard() {
           )}
         </div>
       )}
+      </div>
 
       {/* Manage Participants Modal */}
       {selectedTournament && (
@@ -775,6 +777,6 @@ export default function AdminDashboard() {
           </div>
         </div>
       )}
-    </div>
+    </>
   );
 }
