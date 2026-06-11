@@ -63,9 +63,9 @@ export async function GET(req: NextRequest) {
   for (const fixture of apiData.response) {
     const matchRef = db.collection("matches").doc(String(fixture.fixture.id));
     const apiStatus = fixture.fixture.status.short;
-    const mappedStatus = mapApiStatus(apiStatus);
-    const isFinished = ["FT", "AET", "PEN"].includes(apiStatus);
-    const isLive = ["1H", "2H", "HT", "ET", "BT", "P", "INT"].includes(apiStatus);
+    const hasGoals = fixture.goals.home !== null && fixture.goals.away !== null;
+    const isFinished = ["FT", "AET", "PEN"].includes(apiStatus) && hasGoals;
+    const mappedStatus = isFinished ? "FT" : (["FT", "AET", "PEN"].includes(apiStatus) ? "LIVE" : mapApiStatus(apiStatus));
 
     batch.update(matchRef, {
       status: mappedStatus,

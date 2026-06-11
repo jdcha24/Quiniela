@@ -9,8 +9,10 @@ export function mapFixtureToMatch(
   tournamentId: string
 ): MatchDocument {
   const kickoffDate = new Date(fixture.fixture.date);
-  const mappedStatus = mapApiStatus(fixture.fixture.status.short);
-  const isFinished = ["FT", "AET", "PEN"].includes(fixture.fixture.status.short);
+  const apiStatus = fixture.fixture.status.short;
+  const hasGoals = fixture.goals.home !== null && fixture.goals.away !== null;
+  const isFinished = ["FT", "AET", "PEN"].includes(apiStatus) && hasGoals;
+  const mappedStatus = isFinished ? "FT" : (["FT", "AET", "PEN"].includes(apiStatus) ? "LIVE" : mapApiStatus(apiStatus));
 
   return {
     id: String(fixture.fixture.id),
