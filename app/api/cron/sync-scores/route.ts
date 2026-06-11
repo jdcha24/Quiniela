@@ -24,17 +24,33 @@ export async function GET(req: NextRequest) {
     .where("status", "in", ["NS", "LIVE", "HT"])
     .get();
 
+  // Self-healing: also fetch any matches marked "FT" that have null or missing scores
+  const finishedSnap = await db
+    .collection("matches")
+    .where("status", "==", "FT")
+    .get();
+
+  const unresolvedDocs = finishedSnap.docs.filter((doc) => {
+    const data = doc.data();
+    const homeScore = data.finalScore?.home;
+    const awayScore = data.finalScore?.away;
+    return homeScore === null || homeScore === undefined || awayScore === null || awayScore === undefined;
+  });
+
   const now = new Date();
   // Filter active matches in memory: only sync matches that kicked off in the past or start in the next 30 minutes
   const timeThreshold = new Date(now.getTime() + 30 * 60 * 1000);
-  const activeMatchesDocs = matchesSnap.docs.filter((doc) => {
-    const data = doc.data();
-    const kickoff = data.kickoffTime?.toDate();
-    return kickoff && kickoff <= timeThreshold;
-  });
+  const activeMatchesDocs = [
+    ...matchesSnap.docs.filter((doc) => {
+      const data = doc.data();
+      const kickoff = data.kickoffTime?.toDate();
+      return kickoff && kickoff <= timeThreshold;
+    }),
+    ...unresolvedDocs
+  ];
 
   if (activeMatchesDocs.length === 0) {
-    return NextResponse.json({ message: "No active matches to sync, skipping API call" });
+    return NextResponse.json({ message: "No active or unresolved matches to sync, skipping API call" });
   }
 
   // Determine dynamic date range (dateFrom / dateTo) in UTC based on kickoff dates of the matches to sync
