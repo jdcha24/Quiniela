@@ -175,11 +175,14 @@ export async function fetchFixtures(params: {
 }
 
 // ─── Live Fixtures ────────────────────────────────────────────────────────────
-export async function fetchLiveFixtures(fixtureIds: number[]) {
+export async function fetchLiveFixtures(fixtureIds: number[], dateFrom?: string, dateTo?: string) {
   if (fixtureIds.length === 0) return { response: [] };
 
   const apiKey = process.env.FOOTBALL_DATA_KEY || "";
-  const url = `${BASE_URL}/matches`;
+  let url = `${BASE_URL}/matches`;
+  if (dateFrom && dateTo) {
+    url += `?dateFrom=${dateFrom}&dateTo=${dateTo}`;
+  }
 
   const res = await fetch(url, {
     headers: { "X-Auth-Token": apiKey },

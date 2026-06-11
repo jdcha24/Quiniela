@@ -9,6 +9,8 @@ export function mapFixtureToMatch(
   tournamentId: string
 ): MatchDocument {
   const kickoffDate = new Date(fixture.fixture.date);
+  const mappedStatus = mapApiStatus(fixture.fixture.status.short);
+  const isFinished = ["FT", "AET", "PEN"].includes(fixture.fixture.status.short);
 
   return {
     id: String(fixture.fixture.id),
@@ -32,11 +34,18 @@ export function mapFixtureToMatch(
       shortName: buildShortName(fixture.teams.away.name),
     },
     kickoffTime: Timestamp.fromDate(kickoffDate) as unknown as import("firebase/firestore").Timestamp,
-    status: "NS",
-    liveScore: { home: null, away: null, elapsed: null },
-    finalScore: { home: null, away: null },
+    status: mappedStatus,
+    liveScore: {
+      home: fixture.goals.home,
+      away: fixture.goals.away,
+      elapsed: fixture.fixture.status.elapsed,
+    },
+    finalScore: {
+      home: isFinished ? fixture.goals.home : null,
+      away: isFinished ? fixture.goals.away : null,
+    },
     lastSyncedAt: Timestamp.now() as unknown as import("firebase/firestore").Timestamp,
-    isLocked: kickoffDate <= new Date(),
+    isLocked: mappedStatus !== "NS" || kickoffDate <= new Date(),
   };
 }
 

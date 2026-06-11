@@ -18,28 +18,32 @@ export async function GET(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
-  const now = new Date();
-  const todayStart = new Date(now);
-  todayStart.setHours(0, 0, 0, 0);
-  const todayEnd = new Date(now);
-  todayEnd.setHours(23, 59, 59, 999);
-
-  // Smart polling: fetch matches scheduled for today (single-field range query, no composite index needed)
+  // Fetch all active matches (Not Started, Live, Halftime)
   const matchesSnap = await db
     .collection("matches")
-    .where("kickoffTime", ">=", Timestamp.fromDate(todayStart))
-    .where("kickoffTime", "<=", Timestamp.fromDate(todayEnd))
+    .where("status", "in", ["NS", "LIVE", "HT"])
     .get();
 
-  // Filter by active status in memory to bypass Firestore composite index requirement
+  const now = new Date();
+  // Filter active matches in memory: only sync matches that kicked off in the past or start in the next 30 minutes
+  const timeThreshold = new Date(now.getTime() + 30 * 60 * 1000);
   const activeMatchesDocs = matchesSnap.docs.filter((doc) => {
-    const status = doc.data().status;
-    return ["NS", "LIVE", "HT"].includes(status);
+    const data = doc.data();
+    const kickoff = data.kickoffTime?.toDate();
+    return kickoff && kickoff <= timeThreshold;
   });
 
   if (activeMatchesDocs.length === 0) {
-    return NextResponse.json({ message: "No active matches today, skipping API call" });
+    return NextResponse.json({ message: "No active matches to sync, skipping API call" });
   }
+
+  // Determine dynamic date range (dateFrom / dateTo) in UTC based on kickoff dates of the matches to sync
+  const kickoffDates = activeMatchesDocs.map((d) => d.data().kickoffTime.toDate() as Date);
+  const minDate = new Date(Math.min(...kickoffDates.map((d) => d.getTime())));
+  const maxDate = new Date(Math.max(...kickoffDates.map((d) => d.getTime())));
+
+  const dateFrom = minDate.toISOString().split("T")[0];
+  const dateTo = maxDate.toISOString().split("T")[0];
 
   const fixtureIds = activeMatchesDocs.map(
     (d) => d.data().fixtureId as number
@@ -47,7 +51,7 @@ export async function GET(req: NextRequest) {
 
   let apiData: { response: ApiFixtureResponse[] };
   try {
-    apiData = await fetchLiveFixtures(fixtureIds) as { response: ApiFixtureResponse[] };
+    apiData = await fetchLiveFixtures(fixtureIds, dateFrom, dateTo) as { response: ApiFixtureResponse[] };
   } catch (err) {
     console.error("[CRON] API fetch failed:", err);
     return NextResponse.json({ error: "API fetch failed" }, { status: 502 });
