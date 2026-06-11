@@ -198,7 +198,42 @@ export async function fetchLiveFixtures(fixtureIds: number[], dateFrom?: string,
 
   const trackedMatches = todayMatches.filter((m: any) => fixtureIds.includes(Number(m.id)));
 
-  const mapped = trackedMatches.map((m: any) => 
+  console.log(`[API-CLIENT] Bulk /v4/matches devolvió ${todayMatches.length} partidos totales, ${trackedMatches.length} coinciden con fixtureIds`);
+
+  // IDs that were not found in the bulk response (e.g. premium competitions like FIFA WC)
+  const foundIds = new Set(trackedMatches.map((m: any) => Number(m.id)));
+  const missingIds = fixtureIds.filter((id) => !foundIds.has(id));
+
+  // Fallback: fetch each missing match individually via /v4/matches/{id}
+  const individualMatches: any[] = [];
+  for (const id of missingIds) {
+    console.log(`[API-CLIENT] ID ${id} no encontrado en bulk. Intentando fetch individual: GET /v4/matches/${id}`);
+    try {
+      const indRes = await fetch(`${BASE_URL}/matches/${id}`, {
+        headers: { "X-Auth-Token": apiKey },
+        cache: "no-store",
+      });
+      if (!indRes.ok) {
+        console.warn(`[API-CLIENT]   → Error HTTP ${indRes.status} para el partido ${id}`);
+        continue;
+      }
+      const indData = await indRes.json();
+      // The individual endpoint returns the match object directly (not nested in matches[])
+      const matchObj = indData.id ? indData : indData.match;
+      if (matchObj) {
+        console.log(`[API-CLIENT]   → ✓ Partido ${id}: ${matchObj.homeTeam?.name} vs ${matchObj.awayTeam?.name} | status: ${matchObj.status} | fullTime: ${JSON.stringify(matchObj.score?.fullTime)}`);
+        individualMatches.push(matchObj);
+      } else {
+        console.warn(`[API-CLIENT]   → ✗ Respuesta inesperada para partido ${id}:`, JSON.stringify(indData).substring(0, 300));
+      }
+    } catch (err) {
+      console.error(`[API-CLIENT]   → ✗ Error fetcheando partido ${id} individualmente:`, err);
+    }
+  }
+
+  const allMatches = [...trackedMatches, ...individualMatches];
+
+  const mapped = allMatches.map((m: any) =>
     mapFootballDataMatchToApiFootballFixture(m, m.competition, new Date(m.utcDate).getFullYear())
   );
 
