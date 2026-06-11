@@ -1,6 +1,5 @@
 // app/api/cron/sync-scores/route.ts
 // Called every 15 minutes by cron-job.org or Vercel Crons
-// Smart polling: only fetches API if there are active matches today
 export const dynamic = "force-dynamic";
 
 import { NextRequest, NextResponse } from "next/server";
@@ -11,24 +10,43 @@ import { Timestamp, FieldValue } from "firebase-admin/firestore";
 import { mapApiStatus } from "@/lib/api-football/mappers";
 import { ApiFixtureResponse } from "@/types/api-football";
 
+const TAG = "[SYNC-SCORES]";
+
 export async function GET(req: NextRequest) {
-  // Verify cron secret
+  console.log(`\n${TAG} ════════════════════════════════════════`);
+  console.log(`${TAG} Sync iniciado: ${new Date().toISOString()}`);
+
+  // ── Verificar autenticación ─────────────────────────────────────────────────
   const authHeader = req.headers.get("Authorization");
-  if (authHeader !== `Bearer ${process.env.CRON_SECRET}`) {
+  const expectedSecret = `Bearer ${process.env.CRON_SECRET}`;
+  if (authHeader !== expectedSecret) {
+    console.warn(`${TAG} ❌ FALLO DE AUTENTICACIÓN`);
+    console.warn(`${TAG}    Header recibido : "${authHeader}"`);
+    console.warn(`${TAG}    CRON_SECRET env : ${process.env.CRON_SECRET ? "✓ definido" : "✗ NO definido"}`);
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
+  console.log(`${TAG} ✓ Autenticación correcta`);
 
-  // Fetch all active matches (Not Started, Live, Halftime)
+  // ── Variables de entorno ────────────────────────────────────────────────────
+  console.log(`${TAG} Variables de entorno:`);
+  console.log(`${TAG}   FOOTBALL_DATA_KEY : ${process.env.FOOTBALL_DATA_KEY ? "✓ definida" : "✗ NO DEFINIDA ← posible causa del problema"}`);
+  console.log(`${TAG}   FIREBASE_PROJECT_ID: ${process.env.FIREBASE_PROJECT_ID ?? "✗ NO definida"}`);
+
+  // ── 1. Consulta Firestore: partidos activos ─────────────────────────────────
+  console.log(`\n${TAG} [1/5] Consultando partidos activos en Firestore (NS, LIVE, HT)...`);
   const matchesSnap = await db
     .collection("matches")
     .where("status", "in", ["NS", "LIVE", "HT"])
     .get();
+  console.log(`${TAG}   → Partidos NS/LIVE/HT encontrados: ${matchesSnap.size}`);
 
-  // Self-healing: also fetch any matches marked "FT" that have null or missing scores
+  // ── 2. Self-healing: partidos FT con marcador null ──────────────────────────
+  console.log(`\n${TAG} [2/5] Buscando partidos FT con marcador null (self-healing)...`);
   const finishedSnap = await db
     .collection("matches")
     .where("status", "==", "FT")
     .get();
+  console.log(`${TAG}   → Total partidos FT en Firestore: ${finishedSnap.size}`);
 
   const unresolvedDocs = finishedSnap.docs.filter((doc) => {
     const data = doc.data();
@@ -37,51 +55,107 @@ export async function GET(req: NextRequest) {
     return homeScore === null || homeScore === undefined || awayScore === null || awayScore === undefined;
   });
 
+  console.log(`${TAG}   → Partidos FT con marcador null/undefined: ${unresolvedDocs.length}`);
+  unresolvedDocs.forEach((doc) => {
+    const d = doc.data();
+    console.log(`${TAG}     • ID: ${doc.id} | ${d.homeTeam?.name} vs ${d.awayTeam?.name} | fixtureId: ${d.fixtureId} | finalScore: ${JSON.stringify(d.finalScore)} | liveScore: ${JSON.stringify(d.liveScore)}`);
+  });
+
+  // ── 3. Filtrar y combinar listas ────────────────────────────────────────────
   const now = new Date();
-  // Filter active matches in memory: only sync matches that kicked off in the past or start in the next 30 minutes
   const timeThreshold = new Date(now.getTime() + 30 * 60 * 1000);
-  const activeMatchesDocs = [
-    ...matchesSnap.docs.filter((doc) => {
-      const data = doc.data();
-      const kickoff = data.kickoffTime?.toDate();
-      return kickoff && kickoff <= timeThreshold;
-    }),
-    ...unresolvedDocs
-  ];
+
+  const activeDocs = matchesSnap.docs.filter((doc) => {
+    const data = doc.data();
+    const kickoff = data.kickoffTime?.toDate();
+    return kickoff && kickoff <= timeThreshold;
+  });
+
+  console.log(`\n${TAG} [3/5] Partidos activos dentro del umbral de tiempo (+30 min): ${activeDocs.length}`);
+  activeDocs.forEach((doc) => {
+    const d = doc.data();
+    console.log(`${TAG}   • ID: ${doc.id} | ${d.homeTeam?.name} vs ${d.awayTeam?.name} | status: ${d.status} | kickoff: ${d.kickoffTime?.toDate()?.toISOString()}`);
+  });
+
+  const activeMatchesDocs = [...activeDocs, ...unresolvedDocs];
+  console.log(`${TAG}   → Total a sincronizar (activos + sin resolver): ${activeMatchesDocs.length}`);
 
   if (activeMatchesDocs.length === 0) {
+    console.log(`${TAG} ⚠ No hay partidos que sincronizar. Abortando.`);
     return NextResponse.json({ message: "No active or unresolved matches to sync, skipping API call" });
   }
 
-  // Determine dynamic date range (dateFrom / dateTo) in UTC based on kickoff dates of the matches to sync
+  // ── 4. Calcular rango de fechas y llamar a la API ───────────────────────────
   const kickoffDates = activeMatchesDocs.map((d) => d.data().kickoffTime.toDate() as Date);
   const minDate = new Date(Math.min(...kickoffDates.map((d) => d.getTime())));
   const maxDate = new Date(Math.max(...kickoffDates.map((d) => d.getTime())));
 
   const dateFrom = minDate.toISOString().split("T")[0];
-  const dateTo = maxDate.toISOString().split("T")[0];
+  const dateTo   = maxDate.toISOString().split("T")[0];
 
-  const fixtureIds = activeMatchesDocs.map(
-    (d) => d.data().fixtureId as number
-  );
+  const fixtureIds = activeMatchesDocs.map((d) => d.data().fixtureId as number);
+
+  console.log(`\n${TAG} [4/5] Llamando a football-data.org API...`);
+  console.log(`${TAG}   → dateFrom: ${dateFrom} | dateTo: ${dateTo}`);
+  console.log(`${TAG}   → fixtureIds buscados: [${fixtureIds.join(", ")}]`);
 
   let apiData: { response: ApiFixtureResponse[] };
   try {
     apiData = await fetchLiveFixtures(fixtureIds, dateFrom, dateTo) as { response: ApiFixtureResponse[] };
   } catch (err) {
-    console.error("[CRON] API fetch failed:", err);
+    console.error(`${TAG} ❌ Error llamando a la API:`, err);
     return NextResponse.json({ error: "API fetch failed" }, { status: 502 });
   }
 
+  console.log(`${TAG}   → Partidos devueltos por la API: ${apiData.response.length}`);
+
+  if (apiData.response.length === 0) {
+    console.warn(`${TAG} ⚠ La API devolvió 0 partidos para el rango ${dateFrom} - ${dateTo}.`);
+    console.warn(`${TAG}   Posibles causas:`);
+    console.warn(`${TAG}   1. FOOTBALL_DATA_KEY no está definida o es inválida`);
+    console.warn(`${TAG}   2. Los fixtureIds no corresponden a partidos en la API de football-data.org`);
+    console.warn(`${TAG}   3. Los partidos no están en el rango de fechas consultado`);
+  }
+
+  // Mostrar detalle de cada partido que devolvió la API
+  apiData.response.forEach((f) => {
+    console.log(`${TAG}   Partido API → ID: ${f.fixture.id}`);
+    console.log(`${TAG}     ${f.teams.home.name} vs ${f.teams.away.name}`);
+    console.log(`${TAG}     status: ${f.fixture.status.short} (${f.fixture.status.long})`);
+    console.log(`${TAG}     goals: home=${f.goals.home} away=${f.goals.away}`);
+    console.log(`${TAG}     score.fullTime: home=${f.score?.fulltime?.home} away=${f.score?.fulltime?.away}`);
+  });
+
+  // Detectar fixtureIds que la API NO devolvió
+  const returnedIds = new Set(apiData.response.map((f) => f.fixture.id));
+  const missingIds = fixtureIds.filter((id) => !returnedIds.has(id));
+  if (missingIds.length > 0) {
+    console.warn(`${TAG} ⚠ Los siguientes fixtureIds NO fueron devueltos por la API: [${missingIds.join(", ")}]`);
+    console.warn(`${TAG}   Esto significa que football-data.org no tiene datos para esos IDs en el rango de fechas dado.`);
+  }
+
+  // ── 5. Procesar y escribir en Firestore ──────────────────────────────────────
+  console.log(`\n${TAG} [5/5] Procesando y escribiendo en Firestore...`);
   const batch = db.batch();
   const newlyFinished: ApiFixtureResponse[] = [];
 
   for (const fixture of apiData.response) {
     const matchRef = db.collection("matches").doc(String(fixture.fixture.id));
-    const apiStatus = fixture.fixture.status.short;
-    const hasGoals = fixture.goals.home !== null && fixture.goals.away !== null;
+    const apiStatus  = fixture.fixture.status.short;
+    const hasGoals   = fixture.goals.home !== null && fixture.goals.away !== null;
     const isFinished = ["FT", "AET", "PEN"].includes(apiStatus) && hasGoals;
-    const mappedStatus = isFinished ? "FT" : (["FT", "AET", "PEN"].includes(apiStatus) ? "LIVE" : mapApiStatus(apiStatus));
+    const mappedStatus = isFinished
+      ? "FT"
+      : (["FT", "AET", "PEN"].includes(apiStatus) ? "LIVE" : mapApiStatus(apiStatus));
+
+    console.log(`${TAG}   Escribiendo partido ${fixture.fixture.id}:`);
+    console.log(`${TAG}     apiStatus="${apiStatus}" hasGoals=${hasGoals} isFinished=${isFinished} → mappedStatus="${mappedStatus}"`);
+    console.log(`${TAG}     liveScore → home:${fixture.goals.home} away:${fixture.goals.away}`);
+    if (isFinished) {
+      console.log(`${TAG}     finalScore → home:${fixture.goals.home} away:${fixture.goals.away} ✓`);
+    } else {
+      console.log(`${TAG}     finalScore → NO actualizado (partido no finalizado con goles válidos)`);
+    }
 
     batch.update(matchRef, {
       status: mappedStatus,
@@ -106,8 +180,9 @@ export async function GET(req: NextRequest) {
   }
 
   await batch.commit();
+  console.log(`${TAG} ✓ Batch commit completado`);
 
-  // Evaluate predictions for newly finished matches
+  // ── Evaluar pronósticos de partidos finalizados ───────────────────────────
   let totalEvaluated = 0;
   const tournamentSet = new Set<string>();
 
@@ -117,40 +192,51 @@ export async function GET(req: NextRequest) {
     evaluated.tournamentIds.forEach((tId) => tournamentSet.add(tId));
   }
 
-  // Recalculate ranks for affected tournaments
   for (const tournamentId of tournamentSet) {
     await recalculateRanks(tournamentId);
   }
 
-  return NextResponse.json({
+  const result = {
     synced: apiData.response.length,
     finished: newlyFinished.length,
     predictionsEvaluated: totalEvaluated,
     ranksUpdated: [...tournamentSet],
-  });
+    missingFromApi: missingIds,
+    unresolvedRepaired: unresolvedDocs.length,
+  };
+
+  console.log(`\n${TAG} ════ RESULTADO ════`);
+  console.log(`${TAG}`, JSON.stringify(result, null, 2));
+  console.log(`${TAG} ════════════════════════════════════════\n`);
+
+  return NextResponse.json(result);
 }
 
 // ─── Evaluate predictions for a finished match ───────────────────────────────
 async function evaluateMatchPredictions(
   fixture: ApiFixtureResponse
 ): Promise<{ count: number; tournamentIds: string[] }> {
-  const matchId = String(fixture.fixture.id);
+  const matchId  = String(fixture.fixture.id);
   const homeGoals = fixture.goals.home ?? 0;
   const awayGoals = fixture.goals.away ?? 0;
 
-  // Find all tournaments containing this match
+  console.log(`${TAG} [EVAL] Evaluando pronósticos del partido ${matchId} (${homeGoals}-${awayGoals})`);
+
   const tournamentsSnap = await db
     .collection("tournaments")
     .where("matchIds", "array-contains", matchId)
     .get();
 
   const affectedTournamentIds = tournamentsSnap.docs.map((d) => d.id);
+  console.log(`${TAG} [EVAL]   Torneos afectados: ${affectedTournamentIds.length}`);
 
   const predictionsSnap = await db
     .collection("predictions")
     .where("matchId", "==", matchId)
     .where("pointsEarned", "==", null)
     .get();
+
+  console.log(`${TAG} [EVAL]   Pronósticos sin evaluar: ${predictionsSnap.size}`);
 
   if (predictionsSnap.empty) return { count: 0, tournamentIds: affectedTournamentIds };
 
@@ -159,13 +245,11 @@ async function evaluateMatchPredictions(
   for (const predDoc of predictionsSnap.docs) {
     const pred = predDoc.data();
 
-    // Option 1 evaluation
     const points1 = calculateScore(
       { predictedHome: pred.predictedHome, predictedAway: pred.predictedAway },
       { homeGoals, awayGoals }
     );
 
-    // Option 2 evaluation if present
     let points2: number | null = null;
     if (
       pred.predictedHome2 !== null &&
@@ -181,7 +265,6 @@ async function evaluateMatchPredictions(
 
     const maxPoints = points2 !== null ? Math.max(points1, points2) : points1;
 
-    // Update prediction document
     batch.update(predDoc.ref, {
       pointsEarned1: points1,
       pointsEarned2: points2,
@@ -189,7 +272,6 @@ async function evaluateMatchPredictions(
       evaluatedAt: Timestamp.now(),
     });
 
-    // Update leaderboard entry in all tournaments containing this match where the user participates
     for (const tId of affectedTournamentIds) {
       const leaderboardRef = db
         .collection("tournaments")
@@ -229,7 +311,6 @@ async function recalculateRanks(tournamentId: string): Promise<void> {
 
   leaderboardSnap.docs.forEach((doc, index) => {
     const points = doc.data().totalPoints as number;
-    // Tied players share the same rank
     if (index > 0 && points < prevPoints) {
       currentRank = index + 1;
     }
