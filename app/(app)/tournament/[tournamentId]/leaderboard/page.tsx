@@ -94,11 +94,32 @@ function LeaderboardRow({
 export default function LeaderboardPage() {
   const params = useParams();
   const tournamentId = params.tournamentId as string;
-  const { user } = useAuth();
+  const { user, userDoc, loading: authLoading } = useAuth();
 
   const { entries, loading } = useLeaderboard(tournamentId);
   const { matches } = useLiveMatches(tournamentId);
   const { predictions } = usePredictions(user?.uid ?? null);
+
+  if (authLoading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-mesh">
+        <div className="w-12 h-12 rounded-full border-2 border-violet-500 border-t-transparent animate-spin" />
+      </div>
+    );
+  }
+
+  if (userDoc && userDoc.role !== "admin" && !userDoc.activeTournamentIds?.includes(tournamentId)) {
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-center p-4 bg-mesh text-center space-y-4 animate-fade-up">
+        <div className="text-4xl">🔒</div>
+        <h2 className="text-xl font-bold text-red-400">Acceso no autorizado</h2>
+        <p className="text-white/40 text-sm max-w-xs">No estás registrado en este torneo. Contacta al administrador para solicitar acceso.</p>
+        <Link href="/dashboard" className="px-5 py-2.5 rounded-xl bg-violet-600 hover:bg-violet-500 active:scale-95 text-white font-bold text-sm transition-all">
+          Volver al Inicio
+        </Link>
+      </div>
+    );
+  }
 
   // Calculate live projected bonuses per user
   const liveMatches = matches.filter((m) => m.status === "LIVE" || m.status === "HT");

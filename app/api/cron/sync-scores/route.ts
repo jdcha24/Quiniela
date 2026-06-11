@@ -65,7 +65,7 @@ export async function GET(req: NextRequest) {
 
     batch.update(matchRef, {
       status: mappedStatus,
-      isLocked: true,
+      isLocked: mappedStatus !== "NS" || fixture.fixture.timestamp * 1000 <= Date.now(),
       liveScore: {
         home: fixture.goals.home,
         away: fixture.goals.away,

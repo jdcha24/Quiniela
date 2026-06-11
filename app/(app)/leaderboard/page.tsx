@@ -20,19 +20,26 @@ export default function GlobalLeaderboardPage() {
 
   useEffect(() => {
     const fetchTournaments = async () => {
+      if (!userDoc?.activeTournamentIds || userDoc.activeTournamentIds.length === 0) {
+        setTournaments([]);
+        setSelectedTournament(null);
+        setLoading(false);
+        return;
+      }
+
       const q = query(
         collection(db, "tournaments"),
         where("status", "in", ["open", "in_progress", "finished"])
       );
       const snap = await getDocs(q);
-      const docs = snap.docs.map((d) => ({ id: d.id, ...d.data() } as TournamentDocument));
+      const docs = snap.docs
+        .map((d) => ({ id: d.id, ...d.data() } as TournamentDocument))
+        .filter((t) => userDoc.activeTournamentIds.includes(t.id));
+
       setTournaments(docs);
 
-      // Auto-select first tournament the user is in
-      const myFirst = docs.find((t) =>
-        userDoc?.activeTournamentIds?.includes(t.id)
-      );
-      setSelectedTournament(myFirst?.id ?? docs[0]?.id ?? null);
+      // Auto-select first tournament
+      setSelectedTournament(docs[0]?.id ?? null);
       setLoading(false);
     };
     fetchTournaments();
