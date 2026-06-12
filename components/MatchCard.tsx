@@ -249,9 +249,9 @@ export function MatchCard({
               </span>
             </div>
           )}
-          {isFinished && existing?.pointsEarned !== null && existing?.pointsEarned !== undefined && (
+          {((isFinished || isLive) && existing?.pointsEarned !== null && existing?.pointsEarned !== undefined) && (
             <div className={`px-2.5 py-1 rounded-full text-xs font-black border ${pointsColor(existing.pointsEarned)}`}>
-              +{existing.pointsEarned} pts
+              {isLive ? "En vivo: " : ""}+{existing.pointsEarned} pts
             </div>
           )}
           {locked && !isLive && !isFinished && (

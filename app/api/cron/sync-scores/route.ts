@@ -140,8 +140,7 @@ export async function GET(req: NextRequest) {
   // Track which IDs come from self-healing (FT with null scores)
   const unresolvedIds = new Set(unresolvedDocs.map((d) => d.data().fixtureId as number));
 
-  const newlyFinished: ApiFixtureResponse[] = [];
-  const selfHealedFinished: ApiFixtureResponse[] = [];
+  const toEvaluate: { fixture: ApiFixtureResponse; mappedStatus: string }[] = [];
 
   for (const fixture of apiData.response) {
     const matchRef = db.collection("matches").doc(String(fixture.fixture.id));
@@ -178,14 +177,8 @@ export async function GET(req: NextRequest) {
       lastSyncedAt: Timestamp.now(),
     });
 
-    if (isFinished) {
-      if (unresolvedIds.has(fixture.fixture.id)) {
-        // Self-healed: was FT with null scores before → force re-evaluate with delta correction
-        selfHealedFinished.push(fixture);
-      } else {
-        // Genuinely new finish: normal evaluation
-        newlyFinished.push(fixture);
-      }
+    if (["LIVE", "HT", "FT"].includes(mappedStatus)) {
+      toEvaluate.push({ fixture, mappedStatus });
     }
   }
 
@@ -196,19 +189,10 @@ export async function GET(req: NextRequest) {
   let totalEvaluated = 0;
   const tournamentSet = new Set<string>();
 
-  // Normal evaluation for genuinely new finished matches
-  for (const fixture of newlyFinished) {
-    const evaluated = await evaluateMatchPredictions(fixture);
+  for (const { fixture, mappedStatus } of toEvaluate) {
+    const evaluated = await evaluateOrReevaluateMatchPredictions(fixture, mappedStatus);
     totalEvaluated += evaluated.count;
     evaluated.tournamentIds.forEach((tId) => tournamentSet.add(tId));
-  }
-
-  // Force re-evaluation (with delta correction) for self-healed matches
-  for (const fixture of selfHealedFinished) {
-    console.log(`${TAG} [RE-EVAL] Partido ${fixture.fixture.id} fue auto-reparado → forzando re-evaluación con corrección de delta`);
-    const reevaluated = await forceReevaluateMatchPredictions(fixture);
-    totalEvaluated += reevaluated.count;
-    reevaluated.tournamentIds.forEach((tId) => tournamentSet.add(tId));
   }
 
   for (const tournamentId of tournamentSet) {
@@ -217,8 +201,8 @@ export async function GET(req: NextRequest) {
 
   const result = {
     synced: apiData.response.length,
-    finished: newlyFinished.length,
-    selfHealedAndReevaluated: selfHealedFinished.length,
+    finished: toEvaluate.filter(e => e.mappedStatus === "FT").length,
+    evaluated: toEvaluate.length,
     predictionsEvaluated: totalEvaluated,
     ranksUpdated: [...tournamentSet],
     missingFromApi: missingIds,
@@ -232,88 +216,16 @@ export async function GET(req: NextRequest) {
   return NextResponse.json(result);
 }
 
-// ─── Normal evaluation (only for predictions with pointsEarned == null) ────────
-async function evaluateMatchPredictions(
-  fixture: ApiFixtureResponse
+// ─── Evaluate or re-evaluate predictions with delta correction ────────────────
+async function evaluateOrReevaluateMatchPredictions(
+  fixture: ApiFixtureResponse,
+  mappedStatus: string
 ): Promise<{ count: number; tournamentIds: string[] }> {
   const matchId   = String(fixture.fixture.id);
   const homeGoals = fixture.goals.home ?? 0;
   const awayGoals = fixture.goals.away ?? 0;
 
-  console.log(`${TAG} [EVAL] Evaluando pronósticos del partido ${matchId} (${homeGoals}-${awayGoals})`);
-
-  const tournamentsSnap = await db
-    .collection("tournaments")
-    .where("matchIds", "array-contains", matchId)
-    .get();
-
-  const affectedTournamentIds = tournamentsSnap.docs.map((d) => d.id);
-  console.log(`${TAG} [EVAL]   Torneos afectados: ${affectedTournamentIds.length}`);
-
-  const predictionsSnap = await db
-    .collection("predictions")
-    .where("matchId", "==", matchId)
-    .where("pointsEarned", "==", null)
-    .get();
-
-  console.log(`${TAG} [EVAL]   Pronósticos sin evaluar: ${predictionsSnap.size}`);
-  if (predictionsSnap.empty) return { count: 0, tournamentIds: affectedTournamentIds };
-
-  const batch = db.batch();
-
-  for (const predDoc of predictionsSnap.docs) {
-    const pred = predDoc.data();
-    const points1 = calculateScore(
-      { predictedHome: pred.predictedHome, predictedAway: pred.predictedAway },
-      { homeGoals, awayGoals }
-    );
-    let points2: number | null = null;
-    if (pred.predictedHome2 !== null && pred.predictedHome2 !== undefined &&
-        pred.predictedAway2 !== null && pred.predictedAway2 !== undefined) {
-      points2 = calculateScore(
-        { predictedHome: pred.predictedHome2, predictedAway: pred.predictedAway2 },
-        { homeGoals, awayGoals }
-      );
-    }
-    const maxPoints = points2 !== null ? Math.max(points1, points2) : points1;
-
-    batch.update(predDoc.ref, {
-      pointsEarned1: points1,
-      pointsEarned2: points2,
-      pointsEarned: maxPoints,
-      evaluatedAt: Timestamp.now(),
-    });
-
-    for (const tId of affectedTournamentIds) {
-      const leaderboardRef = db.collection("tournaments").doc(tId).collection("leaderboard").doc(pred.userId);
-      const leaderboardDoc = await leaderboardRef.get();
-      if (leaderboardDoc.exists) {
-        batch.update(leaderboardRef, {
-          totalPoints: FieldValue.increment(maxPoints),
-          ...(maxPoints === 3 && { exactScores: FieldValue.increment(1) }),
-          ...(maxPoints === 1 && { correctResults: FieldValue.increment(1) }),
-          predictions: FieldValue.increment(1),
-          lastUpdated: Timestamp.now(),
-        });
-      }
-    }
-  }
-
-  await batch.commit();
-  return { count: predictionsSnap.size, tournamentIds: affectedTournamentIds };
-}
-
-// ─── Force re-evaluation with DELTA correction (for self-healed matches) ───────
-// Used when a match was previously evaluated with wrong scores (e.g. null→0-0).
-// Computes newPoints - oldPoints and applies the delta to the leaderboard.
-async function forceReevaluateMatchPredictions(
-  fixture: ApiFixtureResponse
-): Promise<{ count: number; tournamentIds: string[] }> {
-  const matchId   = String(fixture.fixture.id);
-  const homeGoals = fixture.goals.home ?? 0;
-  const awayGoals = fixture.goals.away ?? 0;
-
-  console.log(`${TAG} [RE-EVAL] Partido ${matchId}: marcador correcto = ${homeGoals}-${awayGoals}`);
+  console.log(`${TAG} [EVAL-DELTA] Partido ${matchId} (Status: ${mappedStatus}): marcador = ${homeGoals}-${awayGoals}`);
 
   const tournamentsSnap = await db
     .collection("tournaments")
@@ -327,7 +239,7 @@ async function forceReevaluateMatchPredictions(
     .where("matchId", "==", matchId)
     .get();
 
-  console.log(`${TAG} [RE-EVAL]   Total pronósticos encontrados: ${predictionsSnap.size}`);
+  console.log(`${TAG} [EVAL-DELTA]   Total pronósticos encontrados: ${predictionsSnap.size}`);
   if (predictionsSnap.empty) return { count: 0, tournamentIds: affectedTournamentIds };
 
   const batch = db.batch();
@@ -335,8 +247,9 @@ async function forceReevaluateMatchPredictions(
   for (const predDoc of predictionsSnap.docs) {
     const pred = predDoc.data();
 
-    // Previous (possibly wrong) points
-    const oldPoints = typeof pred.pointsEarned === "number" ? pred.pointsEarned : 0;
+    // Previous points
+    const oldPointsExist = pred.pointsEarned !== null && pred.pointsEarned !== undefined;
+    const oldPoints = oldPointsExist ? Number(pred.pointsEarned) : 0;
 
     // Correct points based on real score
     const points1 = calculateScore(
@@ -352,9 +265,9 @@ async function forceReevaluateMatchPredictions(
       );
     }
     const newPoints = points2 !== null ? Math.max(points1, points2) : points1;
-    const delta = newPoints - oldPoints; // can be negative if over-awarded before
+    const delta = newPoints - oldPoints;
 
-    console.log(`${TAG} [RE-EVAL]   Usuario ${pred.userId}: pronóstico ${pred.predictedHome}-${pred.predictedAway} | oldPts=${oldPoints} → newPts=${newPoints} (delta=${delta > 0 ? '+' : ''}${delta})`);
+    console.log(`${TAG} [EVAL-DELTA]   Usuario ${pred.userId}: pronóstico ${pred.predictedHome}-${pred.predictedAway} | oldPts=${oldPointsExist ? oldPoints : "null"} → newPts=${newPoints} (delta=${delta >= 0 ? "+" : ""}${delta})`);
 
     // Update prediction with correct points
     batch.update(predDoc.ref, {
@@ -362,33 +275,48 @@ async function forceReevaluateMatchPredictions(
       pointsEarned2: points2,
       pointsEarned: newPoints,
       evaluatedAt: Timestamp.now(),
-      reevaluatedAt: Timestamp.now(),
     });
 
-    // Apply delta to leaderboard (only if something changed)
-    if (delta !== 0) {
+    const hasLeaderboardUpdates = delta !== 0 || !oldPointsExist;
+
+    if (hasLeaderboardUpdates) {
       for (const tId of affectedTournamentIds) {
         const leaderboardRef = db.collection("tournaments").doc(tId).collection("leaderboard").doc(pred.userId);
         const leaderboardDoc = await leaderboardRef.get();
         if (leaderboardDoc.exists) {
-          const updates: Record<string, unknown> = {
-            totalPoints: FieldValue.increment(delta),
+          const updates: Record<string, any> = {
             lastUpdated: Timestamp.now(),
           };
+
+          if (delta !== 0) {
+            updates.totalPoints = FieldValue.increment(delta);
+          }
+
           // Adjust exactScores counter if the 3-point category changed
           const oldWasExact = oldPoints === 3;
           const newIsExact  = newPoints === 3;
-          if (!oldWasExact && newIsExact)  updates.exactScores   = FieldValue.increment(1);
-          if (oldWasExact  && !newIsExact) updates.exactScores   = FieldValue.increment(-1);
+          if (oldPointsExist) {
+            if (!oldWasExact && newIsExact)  updates.exactScores = FieldValue.increment(1);
+            if (oldWasExact  && !newIsExact) updates.exactScores = FieldValue.increment(-1);
+          } else {
+            if (newIsExact) updates.exactScores = FieldValue.increment(1);
+          }
+
           // Adjust correctResults counter
           const oldWasCorrect = oldPoints === 1;
           const newIsCorrect  = newPoints === 1;
-          if (!oldWasCorrect && newIsCorrect)  updates.correctResults = FieldValue.increment(1);
-          if (oldWasCorrect  && !newIsCorrect) updates.correctResults = FieldValue.increment(-1);
-          // If prediction was never counted before (pointsEarned was null), count it now
-          if (pred.pointsEarned === null || pred.pointsEarned === undefined) {
+          if (oldPointsExist) {
+            if (!oldWasCorrect && newIsCorrect)  updates.correctResults = FieldValue.increment(1);
+            if (oldWasCorrect  && !newIsCorrect) updates.correctResults = FieldValue.increment(-1);
+          } else {
+            if (newIsCorrect) updates.correctResults = FieldValue.increment(1);
+          }
+
+          // If prediction was never counted before, count it now
+          if (!oldPointsExist) {
             updates.predictions = FieldValue.increment(1);
           }
+
           batch.update(leaderboardRef, updates);
         }
       }
@@ -396,7 +324,7 @@ async function forceReevaluateMatchPredictions(
   }
 
   await batch.commit();
-  console.log(`${TAG} [RE-EVAL] ✓ Re-evaluación completada para ${predictionsSnap.size} pronósticos`);
+  console.log(`${TAG} [EVAL-DELTA] ✓ Re-evaluación completada para ${predictionsSnap.size} pronósticos`);
   return { count: predictionsSnap.size, tournamentIds: affectedTournamentIds };
 }
 

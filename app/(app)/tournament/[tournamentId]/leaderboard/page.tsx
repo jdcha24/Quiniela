@@ -129,6 +129,7 @@ export default function LeaderboardPage() {
     return liveMatches.reduce((total, match) => {
       const pred = (predictions as Map<string, PredictionDocument>).get(match.id);
       if (!pred) return total;
+      if (pred.pointsEarned !== null && pred.pointsEarned !== undefined) return total;
       const score1 = projectScore(
         { predictedHome: pred.predictedHome, predictedAway: pred.predictedAway },
         { home: match.liveScore.home, away: match.liveScore.away }
