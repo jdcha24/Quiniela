@@ -129,7 +129,7 @@ export async function POST(req: NextRequest) {
 
         const leaderboardDocRef = leaderboardCol.doc(userId);
 
-        if (activeUserIds.has(userId) || stats.predictionsCount > 0) {
+        if (activeUserIds.has(userId)) {
           batch.set(leaderboardDocRef, {
             userId,
             nickname,
@@ -146,7 +146,7 @@ export async function POST(req: NextRequest) {
             projectedRank: 999,
           }, { merge: true });
         } else {
-          // Limpiar entradas huérfanas si el usuario no tiene predicciones ni está en el torneo
+          // Eliminar de la clasificación si no está asignado al torneo
           batch.delete(leaderboardDocRef);
         }
       }

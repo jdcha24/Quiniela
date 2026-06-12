@@ -155,7 +155,7 @@ async function run() {
 
       const leaderboardDocRef = leaderboardCol.doc(userId);
 
-      if (activeUserIds.has(userId) || stats.predictionsCount > 0) {
+      if (activeUserIds.has(userId)) {
         console.log(`  -> Actualizando clasificación usuario ${userId} (${nickname}): totalPoints=${stats.totalPoints}`);
         batch.set(leaderboardDocRef, {
           userId,
