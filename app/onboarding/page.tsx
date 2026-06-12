@@ -3,7 +3,7 @@
 
 import { useState, useEffect } from "react";
 import { useRouter } from "next/navigation";
-import { doc, setDoc, getDocs, collection, query, where, serverTimestamp } from "firebase/firestore";
+import { doc, setDoc, updateDoc, getDocs, collection, query, where, serverTimestamp } from "firebase/firestore";
 import { db } from "@/lib/firebase/client";
 import { useAuth } from "@/lib/hooks/useAuth";
 import { AvatarBuilder } from "@/components/avatar/AvatarBuilder";
@@ -82,17 +82,12 @@ export default function OnboardingPage() {
     if (!user) return;
     setSaving(true);
 
-    await setDoc(doc(db, "users", user.uid), {
-      uid: user.uid,
-      email: user.email,
+    await updateDoc(doc(db, "users", user.uid), {
       nickname: nickname.trim().toLowerCase(),
       avatarSeed: nickname.trim().toLowerCase(),
       avatarStyle: "adventurer",
       avatarConfig: finalConfig,
-      role: "user",
       onboardingComplete: true,
-      activeTournamentIds: [],
-      createdAt: serverTimestamp(),
       updatedAt: serverTimestamp(),
     });
 

@@ -2,7 +2,7 @@
 "use client";
 
 import { useState, useEffect } from "react";
-import { collection, getDocs, query, where, orderBy, doc, updateDoc, deleteDoc, setDoc, arrayUnion, arrayRemove, serverTimestamp } from "firebase/firestore";
+import { collection, getDocs, getDoc, query, where, orderBy, doc, updateDoc, deleteDoc, setDoc, arrayUnion, arrayRemove, serverTimestamp } from "firebase/firestore";
 import { db } from "@/lib/firebase/client";
 import { useAuth } from "@/lib/hooks/useAuth";
 import { TournamentDocument, UserDocument } from "@/types/firestore";
@@ -166,21 +166,26 @@ export default function AdminDashboard() {
         await updateDoc(userRef, {
           activeTournamentIds: arrayUnion(tournamentId)
         });
-        await setDoc(leaderboardRef, {
-          userId: userToToggle.uid,
-          nickname: userToToggle.nickname || "Jugador",
-          avatarSeed: userToToggle.avatarSeed || "",
-          avatarStyle: userToToggle.avatarStyle || "bottts",
-          avatarConfig: userToToggle.avatarConfig || null,
-          totalPoints: 0,
-          exactScores: 0,
-          correctResults: 0,
-          predictions: 0,
-          rank: 999,
-          lastUpdated: serverTimestamp(),
-          projectedPoints: 0,
-          projectedRank: 999,
-        });
+
+        const leaderboardSnap = await getDoc(leaderboardRef);
+        if (!leaderboardSnap.exists()) {
+          await setDoc(leaderboardRef, {
+            userId: userToToggle.uid,
+            nickname: userToToggle.nickname || "Jugador",
+            avatarSeed: userToToggle.avatarSeed || "",
+            avatarStyle: userToToggle.avatarStyle || "bottts",
+            avatarConfig: userToToggle.avatarConfig || null,
+            totalPoints: 0,
+            exactScores: 0,
+            correctResults: 0,
+            predictions: 0,
+            rank: 999,
+            lastUpdated: serverTimestamp(),
+            projectedPoints: 0,
+            projectedRank: 999,
+          });
+        }
+
         await updateDoc(tournamentRef, {
           participantCount: (selectedTournament.participantCount || 0) + 1
         });
@@ -260,6 +265,35 @@ export default function AdminDashboard() {
     }
   };
 
+  const [recalculating, setRecalculating] = useState(false);
+  const [recalculationResult, setRecalculationResult] = useState<string | null>(null);
+
+  const runRecalculation = async () => {
+    setRecalculating(true);
+    setRecalculationResult(null);
+    try {
+      const token = await user?.getIdToken();
+      const res = await fetch("/api/admin/recalculate-leaderboards", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`
+        }
+      });
+      const data = await res.json();
+      if (data.success) {
+        setRecalculationResult("Clasificaciones recalculadas con éxito para todos los torneos.");
+        fetchTournaments();
+      } else {
+        setRecalculationResult(`Error: ${data.error || "No se pudo recalcular"}`);
+      }
+    } catch (err) {
+      console.error(err);
+      setRecalculationResult("Error al ejecutar la recalculación.");
+    } finally {
+      setRecalculating(false);
+    }
+  };
+
   const statusColor = {
     draft: "text-white/40 bg-white/5 border-white/10",
     open: "text-emerald-400 bg-emerald-500/10 border-emerald-500/30",
@@ -321,6 +355,17 @@ export default function AdminDashboard() {
           {migrating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
           Migrar Datos (Partidos y Pronósticos)
         </button>
+
+        <button
+          onClick={runRecalculation}
+          disabled={recalculating}
+          className="w-full flex items-center justify-center gap-2 py-2.5 rounded-xl
+            bg-emerald-600/20 border border-emerald-500/30 text-emerald-400 text-xs font-bold
+            hover:bg-emerald-600/30 active:scale-95 transition-all disabled:opacity-50 animate-fade-in"
+        >
+          {recalculating ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : null}
+          Recalcular Tablas de Clasificación (Corregir puntos perdidos)
+        </button>
       </div>
 
       {/* Sync result */}
@@ -334,6 +379,13 @@ export default function AdminDashboard() {
       {migrationResult && (
         <div className="px-3 py-2 rounded-xl bg-violet-500/10 border border-violet-500/30 text-xs text-violet-400 animate-fade-in">
           {migrationResult}
+        </div>
+      )}
+
+      {/* Recalculation result */}
+      {recalculationResult && (
+        <div className="px-3 py-2 rounded-xl bg-emerald-500/10 border border-emerald-500/30 text-xs text-emerald-400 animate-fade-in">
+          {recalculationResult}
         </div>
       )}
 
