@@ -70,7 +70,7 @@ function buildShortName(fullName: string): string {
 export function mapApiStatus(
   apiStatus: string
 ): MatchDocument["status"] {
-  const liveStatuses = ["1H", "2H", "HT", "ET", "BT", "P", "INT", "LIVE"];
+  const liveStatuses = ["1H", "2H", "ET", "BT", "P", "INT", "LIVE"];
   if (liveStatuses.includes(apiStatus)) return "LIVE";
 
   switch (apiStatus) {

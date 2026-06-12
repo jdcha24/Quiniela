@@ -8,7 +8,7 @@ import { useAuth } from "@/lib/hooks/useAuth";
 import { useLeaderboard } from "@/lib/hooks/useLeaderboard";
 import { TournamentDocument, LeaderboardEntry } from "@/types/firestore";
 import { getAvatarUrlFromConfig } from "@/lib/utils/dicebear";
-import { Crown, Trophy, ChevronRight } from "lucide-react";
+import { Crown, Trophy, ChevronRight, Flame } from "lucide-react";
 import Link from "next/link";
 
 export default function GlobalLeaderboardPage() {
@@ -106,67 +106,88 @@ export default function GlobalLeaderboardPage() {
         </div>
       ) : (
         <div className="space-y-1.5">
-          {entries.map((entry, index) => {
-            const isMe = entry.userId === user?.uid;
-            const rankColor =
-              entry.rank === 1 ? "rank-gold" :
-              entry.rank === 2 ? "rank-silver" :
-              entry.rank === 3 ? "rank-bronze" : "text-white/50";
+          {(() => {
+            const hasLive = entries.some((e) => (typeof e.projectedPoints === "number" ? e.projectedPoints : e.totalPoints) !== e.totalPoints);
+            const sortedEntries = [...entries];
+            if (hasLive) {
+              sortedEntries.sort((a, b) => {
+                const ptsA = typeof a.projectedPoints === "number" ? a.projectedPoints : a.totalPoints;
+                const ptsB = typeof b.projectedPoints === "number" ? b.projectedPoints : b.totalPoints;
+                return ptsB - ptsA;
+              });
+            }
 
-            return (
-              <div
-                key={entry.userId}
-                id={`leaderboard-row-${entry.userId}`}
-                className={`flex items-center gap-3 p-3 rounded-2xl transition-all ${
-                  isMe
-                    ? "bg-violet-500/15 border border-violet-500/30"
-                    : "bg-white/3 border border-transparent"
-                }`}
-              >
-                {/* Rank */}
-                <div className="w-8 text-center">
-                  {entry.rank <= 3 ? (
-                    <span className={`text-xl font-black ${rankColor}`}>
-                      {entry.rank === 1 ? "🥇" : entry.rank === 2 ? "🥈" : "🥉"}
-                    </span>
-                  ) : (
-                    <span className="text-white/40 text-sm font-bold">{entry.rank}</span>
-                  )}
-                </div>
+            return sortedEntries.map((entry, index) => {
+              const isMe = entry.userId === user?.uid;
+              const rankToDisplay = hasLive ? (entry.projectedRank ?? entry.rank) : entry.rank;
+              const rankColor =
+                rankToDisplay === 1 ? "rank-gold" :
+                rankToDisplay === 2 ? "rank-silver" :
+                rankToDisplay === 3 ? "rank-bronze" : "text-white/50";
 
-                {/* Avatar */}
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={entry.avatarConfig ? getAvatarUrlFromConfig(entry.avatarConfig, 40) : `https://api.dicebear.com/9.x/${entry.avatarStyle}/svg?seed=${entry.avatarSeed}&size=40`}
-                  alt={entry.nickname}
-                  className={`w-10 h-10 rounded-xl border ${isMe ? "border-violet-500/50" : "border-white/10"}`}
-                  style={{
-                    background: entry.avatarConfig?.backgroundColor
-                      ? `#${entry.avatarConfig.backgroundColor}`
-                      : "#1a1a28",
-                  }}
-                />
-
-                {/* Info */}
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-1">
-                    <span className={`font-bold text-sm ${isMe ? "text-violet-300" : "text-white"}`}>
-                      {entry.nickname}
-                    </span>
-                    {isMe && <span className="text-[10px] text-violet-400">(tú)</span>}
+              return (
+                <div
+                  key={entry.userId}
+                  id={`leaderboard-row-${entry.userId}`}
+                  className={`flex items-center gap-3 p-3 rounded-2xl transition-all ${
+                    isMe
+                      ? "bg-violet-500/15 border border-violet-500/30"
+                      : "bg-white/3 border border-transparent"
+                  }`}
+                >
+                  {/* Rank */}
+                  <div className="w-8 text-center">
+                    {rankToDisplay <= 3 ? (
+                      <span className={`text-xl font-black ${rankColor}`}>
+                        {rankToDisplay === 1 ? "🥇" : rankToDisplay === 2 ? "🥈" : "🥉"}
+                      </span>
+                    ) : (
+                      <span className="text-white/40 text-sm font-bold">{rankToDisplay}</span>
+                    )}
                   </div>
-                  <div className="text-xs text-white/30">
-                    {entry.exactScores}✓ exactos · {entry.correctResults}✓ resultados
+
+                  {/* Avatar */}
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img
+                    src={entry.avatarConfig ? getAvatarUrlFromConfig(entry.avatarConfig, 40) : `https://api.dicebear.com/9.x/${entry.avatarStyle}/svg?seed=${entry.avatarSeed}&size=40`}
+                    alt={entry.nickname}
+                    className={`w-10 h-10 rounded-xl border ${isMe ? "border-violet-500/50" : "border-white/10"}`}
+                    style={{
+                      background: entry.avatarConfig?.backgroundColor
+                        ? `#${entry.avatarConfig.backgroundColor}`
+                        : "#1a1a28",
+                    }}
+                  />
+
+                  {/* Info */}
+                  <div className="flex-1 min-w-0">
+                    <div className="flex items-center gap-1">
+                      <span className={`font-bold text-sm ${isMe ? "text-violet-300" : "text-white"}`}>
+                        {entry.nickname}
+                      </span>
+                      {isMe && <span className="text-[10px] text-violet-400">(tú)</span>}
+                    </div>
+                    <div className="text-xs text-white/30">
+                      {entry.exactScores}✓ exactos · {entry.correctResults}✓ resultados
+                    </div>
+                  </div>
+
+                  {/* Points */}
+                  <div className="flex flex-col items-end shrink-0">
+                    <span className={`text-xl font-black ${isMe ? "text-violet-300" : "text-white"}`}>
+                      {entry.totalPoints}
+                    </span>
+                    {hasLive && (typeof entry.projectedPoints === "number" ? entry.projectedPoints : entry.totalPoints) > entry.totalPoints && (
+                      <div className="flex items-center gap-0.5 text-cyan-400 mt-0.5">
+                        <Flame className="w-3 h-3" />
+                        <span className="text-[10px] font-bold">+{entry.projectedPoints - entry.totalPoints}</span>
+                      </div>
+                    )}
                   </div>
                 </div>
-
-                {/* Points */}
-                <span className={`text-xl font-black ${isMe ? "text-violet-300" : "text-white"}`}>
-                  {entry.totalPoints}
-                </span>
-              </div>
-            );
-          })}
+              );
+            });
+          })()}
         </div>
       )}
     </div>

@@ -23,10 +23,12 @@ function LeaderboardRow({
   entry,
   isCurrentUser,
   projectedBonus,
+  displayRank,
 }: {
   entry: LeaderboardEntry;
   isCurrentUser: boolean;
   projectedBonus: number;
+  displayRank: number;
 }) {
   const projectedTotal = entry.totalPoints + projectedBonus;
 
@@ -40,7 +42,7 @@ function LeaderboardRow({
     >
       {/* Rank */}
       <div className="w-8 flex justify-center shrink-0">
-        <RankBadge rank={entry.rank} />
+        <RankBadge rank={displayRank} />
       </div>
 
       {/* Avatar */}
@@ -121,37 +123,22 @@ export default function LeaderboardPage() {
     );
   }
 
-  // Calculate live projected bonuses per user
+  // Calculate live projected bonuses per user from database projectedPoints
   const liveMatches = matches.filter((m) => m.status === "LIVE" || m.status === "HT");
+  const hasLive = liveMatches.length > 0;
 
-  const calculateProjectedBonus = (userId: string): number => {
-    if (liveMatches.length === 0) return 0;
-    return liveMatches.reduce((total, match) => {
-      const pred = (predictions as Map<string, PredictionDocument>).get(match.id);
-      if (!pred) return total;
-      if (pred.pointsEarned !== null && pred.pointsEarned !== undefined) return total;
-      const score1 = projectScore(
-        { predictedHome: pred.predictedHome, predictedAway: pred.predictedAway },
-        { home: match.liveScore.home, away: match.liveScore.away }
-      );
-      let score2: number | null = null;
-      if (
-        pred.predictedHome2 !== null &&
-        pred.predictedHome2 !== undefined &&
-        pred.predictedAway2 !== null &&
-        pred.predictedAway2 !== undefined
-      ) {
-        score2 = projectScore(
-          { predictedHome: pred.predictedHome2, predictedAway: pred.predictedAway2 },
-          { home: match.liveScore.home, away: match.liveScore.away }
-        );
-      }
-      const maxScore = score2 !== null ? Math.max(score1 ?? 0, score2 ?? 0) : (score1 ?? 0);
-      return total + maxScore;
-    }, 0);
-  };
+  const myEntry = entries.find((e) => e.userId === user?.uid);
+  const myProjectedPoints = myEntry ? (typeof myEntry.projectedPoints === "number" ? myEntry.projectedPoints : myEntry.totalPoints) : 0;
+  const myProjectedBonus = myEntry ? Math.max(0, myProjectedPoints - myEntry.totalPoints) : 0;
 
-  const myProjectedBonus = user ? calculateProjectedBonus(user.uid) : 0;
+  const sortedEntries = [...entries];
+  if (hasLive) {
+    sortedEntries.sort((a, b) => {
+      const ptsA = typeof a.projectedPoints === "number" ? a.projectedPoints : a.totalPoints;
+      const ptsB = typeof b.projectedPoints === "number" ? b.projectedPoints : b.totalPoints;
+      return ptsB - ptsA;
+    });
+  }
 
   return (
     <div className="px-4 py-5 space-y-5 animate-fade-up">
@@ -212,14 +199,20 @@ export default function LeaderboardPage() {
         </div>
       ) : (
         <div className="space-y-1.5">
-          {entries.map((entry, i) => (
-            <LeaderboardRow
-              key={entry.userId}
-              entry={entry}
-              isCurrentUser={entry.userId === user?.uid}
-              projectedBonus={entry.userId === user?.uid ? myProjectedBonus : 0}
-            />
-          ))}
+          {sortedEntries.map((entry, i) => {
+            const entryProjPoints = typeof entry.projectedPoints === "number" ? entry.projectedPoints : entry.totalPoints;
+            const bonus = Math.max(0, entryProjPoints - entry.totalPoints);
+            const displayRank = hasLive ? (entry.projectedRank ?? entry.rank) : entry.rank;
+            return (
+              <LeaderboardRow
+                key={entry.userId}
+                entry={entry}
+                isCurrentUser={entry.userId === user?.uid}
+                projectedBonus={bonus}
+                displayRank={displayRank}
+              />
+            );
+          })}
         </div>
       )}
 

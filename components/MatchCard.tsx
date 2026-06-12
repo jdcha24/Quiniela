@@ -245,7 +245,10 @@ export function MatchCard({
               <div className="w-1.5 h-1.5 rounded-full bg-red-400 animate-live-pulse" />
               <Radio className="w-3 h-3 text-red-400" />
               <span className="text-xs font-bold text-red-400">
-                {match.liveScore.elapsed ?? "HT"}&apos;
+                {match.liveScore.elapsed !== null && match.liveScore.elapsed !== undefined
+                  ? `${match.liveScore.elapsed}'`
+                  : (match.status === "HT" ? "HT" : "En vivo")
+                }
               </span>
             </div>
           )}

@@ -249,7 +249,10 @@ async function evaluateOrReevaluateMatchPredictions(
 
     // Previous points
     const oldPointsExist = pred.pointsEarned !== null && pred.pointsEarned !== undefined;
-    const oldPoints = oldPointsExist ? Number(pred.pointsEarned) : 0;
+    const oldIsLive = pred.isLive === true;
+
+    const oldPointsOfficial = (oldPointsExist && !oldIsLive) ? Number(pred.pointsEarned) : 0;
+    const oldPointsProjected = oldPointsExist ? Number(pred.pointsEarned) : 0;
 
     // Correct points based on real score
     const points1 = calculateScore(
@@ -265,19 +268,26 @@ async function evaluateOrReevaluateMatchPredictions(
       );
     }
     const newPoints = points2 !== null ? Math.max(points1, points2) : points1;
-    const delta = newPoints - oldPoints;
 
-    console.log(`${TAG} [EVAL-DELTA]   Usuario ${pred.userId}: pronóstico ${pred.predictedHome}-${pred.predictedAway} | oldPts=${oldPointsExist ? oldPoints : "null"} → newPts=${newPoints} (delta=${delta >= 0 ? "+" : ""}${delta})`);
+    const isLiveEvaluation = mappedStatus !== "FT";
+    const newPointsOfficial = isLiveEvaluation ? 0 : newPoints;
+    const newPointsProjected = newPoints;
 
-    // Update prediction with correct points
+    const deltaOfficial = newPointsOfficial - oldPointsOfficial;
+    const deltaProjected = newPointsProjected - oldPointsProjected;
+
+    console.log(`${TAG} [EVAL-DELTA]   Usuario ${pred.userId}: pred ${pred.predictedHome}-${pred.predictedAway} | oldPts(Off/Proj)=${oldPointsOfficial}/${oldPointsProjected} → newPts(Off/Proj)=${newPointsOfficial}/${newPointsProjected} (deltaOff=${deltaOfficial >= 0 ? "+" : ""}${deltaOfficial}, deltaProj=${deltaProjected >= 0 ? "+" : ""}${deltaProjected})`);
+
+    // Update prediction with correct points and isLive flag
     batch.update(predDoc.ref, {
       pointsEarned1: points1,
       pointsEarned2: points2,
       pointsEarned: newPoints,
       evaluatedAt: Timestamp.now(),
+      isLive: isLiveEvaluation,
     });
 
-    const hasLeaderboardUpdates = delta !== 0 || !oldPointsExist;
+    const hasLeaderboardUpdates = deltaOfficial !== 0 || deltaProjected !== 0 || !oldPointsExist;
 
     if (hasLeaderboardUpdates) {
       for (const tId of affectedTournamentIds) {
@@ -288,14 +298,17 @@ async function evaluateOrReevaluateMatchPredictions(
             lastUpdated: Timestamp.now(),
           };
 
-          if (delta !== 0) {
-            updates.totalPoints = FieldValue.increment(delta);
+          if (deltaOfficial !== 0) {
+            updates.totalPoints = FieldValue.increment(deltaOfficial);
+          }
+          if (deltaProjected !== 0) {
+            updates.projectedPoints = FieldValue.increment(deltaProjected);
           }
 
           // Adjust exactScores counter if the 3-point category changed
-          const oldWasExact = oldPoints === 3;
-          const newIsExact  = newPoints === 3;
-          if (oldPointsExist) {
+          const oldWasExact = oldPointsOfficial === 3;
+          const newIsExact  = newPointsOfficial === 3;
+          if (oldPointsExist && !oldIsLive) {
             if (!oldWasExact && newIsExact)  updates.exactScores = FieldValue.increment(1);
             if (oldWasExact  && !newIsExact) updates.exactScores = FieldValue.increment(-1);
           } else {
@@ -303,9 +316,9 @@ async function evaluateOrReevaluateMatchPredictions(
           }
 
           // Adjust correctResults counter
-          const oldWasCorrect = oldPoints === 1;
-          const newIsCorrect  = newPoints === 1;
-          if (oldPointsExist) {
+          const oldWasCorrect = oldPointsOfficial === 1;
+          const newIsCorrect  = newPointsOfficial === 1;
+          if (oldPointsExist && !oldIsLive) {
             if (!oldWasCorrect && newIsCorrect)  updates.correctResults = FieldValue.increment(1);
             if (oldWasCorrect  && !newIsCorrect) updates.correctResults = FieldValue.increment(-1);
           } else {
@@ -330,6 +343,7 @@ async function evaluateOrReevaluateMatchPredictions(
 
 // ─── Recalculate ranks in a tournament ───────────────────────────────────────
 async function recalculateRanks(tournamentId: string): Promise<void> {
+  // 1. Recalculate rank (based on totalPoints desc)
   const leaderboardSnap = await db
     .collection("tournaments")
     .doc(tournamentId)
@@ -351,4 +365,27 @@ async function recalculateRanks(tournamentId: string): Promise<void> {
   });
 
   await batch.commit();
+
+  // 2. Recalculate projectedRank (based on projectedPoints desc)
+  const leaderboardSnapProj = await db
+    .collection("tournaments")
+    .doc(tournamentId)
+    .collection("leaderboard")
+    .orderBy("projectedPoints", "desc")
+    .get();
+
+  const batchProj = db.batch();
+  let currentRankProj = 1;
+  let prevPointsProj = -1;
+
+  leaderboardSnapProj.docs.forEach((doc, index) => {
+    const points = (doc.data().projectedPoints ?? doc.data().totalPoints) as number;
+    if (index > 0 && points < prevPointsProj) {
+      currentRankProj = index + 1;
+    }
+    batchProj.update(doc.ref, { projectedRank: currentRankProj });
+    prevPointsProj = points;
+  });
+
+  await batchProj.commit();
 }
