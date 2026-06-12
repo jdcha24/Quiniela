@@ -1,11 +1,11 @@
 // app/(app)/layout.tsx — Protected app layout with bottom nav
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useRouter, usePathname } from "next/navigation";
 import Link from "next/link";
 import { useAuth } from "@/lib/hooks/useAuth";
-import { LayoutDashboard, Target, Trophy, User, ShieldCheck } from "lucide-react";
+import { LayoutDashboard, Target, Trophy, User, ShieldCheck, RefreshCw } from "lucide-react";
 import { getAvatarUrlFromConfig, defaultAvatarConfig } from "@/lib/utils/dicebear";
 
 const NAV_ITEMS = [
@@ -19,6 +19,28 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const { user, userDoc, loading } = useAuth();
   const router = useRouter();
   const pathname = usePathname();
+  const [syncing, setSyncing] = useState(false);
+
+  const handleSync = async () => {
+    if (!user) return;
+    setSyncing(true);
+    try {
+      const token = await user.getIdToken();
+      const res = await fetch("/api/cron/sync-scores", {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json();
+      if (res.ok) {
+        alert(`Sincronización exitosa:\n• Partidos actualizados: ${data.synced}\n• Evaluados en vivo: ${data.evaluated}`);
+      } else {
+        alert(`Error al sincronizar: ${data.error || 'Desconocido'}`);
+      }
+    } catch (err) {
+      alert(`Error al sincronizar: ${err instanceof Error ? err.message : 'Error de red'}`);
+    } finally {
+      setSyncing(false);
+    }
+  };
 
   useEffect(() => {
     if (!loading) {
@@ -48,13 +70,23 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
           </h1>
           <div className="flex items-center gap-2">
             {userDoc.role === "admin" && (
-              <Link
-                href="/admin"
-                className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-400 text-xs font-bold"
-              >
-                <ShieldCheck className="w-3.5 h-3.5" />
-                Admin
-              </Link>
+              <>
+                <button
+                  onClick={handleSync}
+                  disabled={syncing}
+                  className="flex items-center gap-1 px-2.5 py-1.5 rounded-xl bg-violet-500/10 border border-violet-500/30 text-violet-300 text-xs font-bold transition-all disabled:opacity-50 hover:bg-violet-500/20 active:scale-95 cursor-pointer shrink-0"
+                >
+                  <RefreshCw className={`w-3.5 h-3.5 ${syncing ? "animate-spin" : ""}`} />
+                  Sync
+                </button>
+                <Link
+                  href="/admin"
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-400 text-xs font-bold shrink-0"
+                >
+                  <ShieldCheck className="w-3.5 h-3.5" />
+                  Admin
+                </Link>
+              </>
             )}
             <Link href="/profile" className="flex items-center gap-2">
               {/* eslint-disable-next-line @next/next/no-img-element */}

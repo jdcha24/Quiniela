@@ -24,13 +24,15 @@ function LeaderboardRow({
   isCurrentUser,
   projectedBonus,
   displayRank,
+  hasLive,
 }: {
   entry: LeaderboardEntry;
   isCurrentUser: boolean;
   projectedBonus: number;
   displayRank: number;
+  hasLive: boolean;
 }) {
-  const projectedTotal = entry.totalPoints + projectedBonus;
+  const pointsToDisplay = hasLive ? (entry.projectedPoints ?? entry.totalPoints) : entry.totalPoints;
 
   return (
     <div
@@ -80,11 +82,11 @@ function LeaderboardRow({
       {/* Points */}
       <div className="flex flex-col items-end shrink-0">
         <span className={`text-xl font-black ${isCurrentUser ? "text-violet-300" : "text-white"}`}>
-          {entry.totalPoints}
+          {pointsToDisplay}
         </span>
         {projectedBonus > 0 && (
           <div className="flex items-center gap-0.5 text-cyan-400">
-            <Flame className="w-3 h-3" />
+            <Flame className="w-3 h-3 animate-pulse text-cyan-400" />
             <span className="text-xs font-bold">+{projectedBonus}</span>
           </div>
         )}
@@ -210,6 +212,7 @@ export default function LeaderboardPage() {
                 isCurrentUser={entry.userId === user?.uid}
                 projectedBonus={bonus}
                 displayRank={displayRank}
+                hasLive={hasLive}
               />
             );
           })}

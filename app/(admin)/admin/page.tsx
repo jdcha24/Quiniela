@@ -34,7 +34,7 @@ export default function AdminDashboard() {
     const token = await user.getIdToken();
     try {
       const res = await fetch("/api/cron/sync-scores", {
-        headers: { Authorization: `Bearer ${process.env.CRON_SECRET ?? "quiniela_cron_secret_changeme_2024"}` },
+        headers: { Authorization: `Bearer ${token}` },
       });
       const data = await res.json();
       setSyncResult(data);

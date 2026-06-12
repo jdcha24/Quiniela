@@ -175,11 +175,11 @@ export default function GlobalLeaderboardPage() {
                   {/* Points */}
                   <div className="flex flex-col items-end shrink-0">
                     <span className={`text-xl font-black ${isMe ? "text-violet-300" : "text-white"}`}>
-                      {entry.totalPoints}
+                      {hasLive ? (entry.projectedPoints ?? entry.totalPoints) : entry.totalPoints}
                     </span>
-                    {hasLive && (typeof entry.projectedPoints === "number" ? entry.projectedPoints : entry.totalPoints) > entry.totalPoints && (
+                    {hasLive && (entry.projectedPoints ?? entry.totalPoints) > entry.totalPoints && (
                       <div className="flex items-center gap-0.5 text-cyan-400 mt-0.5">
-                        <Flame className="w-3 h-3" />
+                        <Flame className="w-3 h-3 animate-pulse text-cyan-400" />
                         <span className="text-[10px] font-bold">+{entry.projectedPoints - entry.totalPoints}</span>
                       </div>
                     )}

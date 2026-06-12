@@ -3,7 +3,7 @@
 export const dynamic = "force-dynamic";
 
 import { NextRequest, NextResponse } from "next/server";
-import { db } from "@/lib/firebase/admin";
+import { db, verifyAdminSession } from "@/lib/firebase/admin";
 import { fetchLiveFixtures } from "@/lib/api-football/client";
 import { calculateScore } from "@/lib/scoring/calculator";
 import { Timestamp, FieldValue } from "firebase-admin/firestore";
@@ -19,10 +19,21 @@ export async function GET(req: NextRequest) {
   // ── Verificar autenticación ─────────────────────────────────────────────────
   const authHeader = req.headers.get("Authorization");
   const expectedSecret = `Bearer ${process.env.CRON_SECRET}`;
-  if (authHeader !== expectedSecret) {
-    console.warn(`${TAG} ❌ FALLO DE AUTENTICACIÓN`);
-    console.warn(`${TAG}    Header recibido : "${authHeader}"`);
-    console.warn(`${TAG}    CRON_SECRET env : ${process.env.CRON_SECRET ? "✓ definido" : "✗ NO definido"}`);
+  let authorized = false;
+
+  if (authHeader === expectedSecret) {
+    authorized = true;
+  } else {
+    try {
+      await verifyAdminSession(req);
+      authorized = true;
+      console.log(`${TAG} ✓ Autenticado mediante sesión de administrador`);
+    } catch (err) {
+      console.warn(`${TAG} ❌ FALLO DE AUTENTICACIÓN (Ni token cron ni admin válido)`);
+    }
+  }
+
+  if (!authorized) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
   console.log(`${TAG} ✓ Autenticación correcta`);
