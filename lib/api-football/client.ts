@@ -13,13 +13,13 @@ function mapFootballDataMatchToApiFootballFixture(m: any, comp: any, seasonYear:
   const statusUpper = m.status?.toUpperCase() || "";
   if (statusUpper === "FINISHED") {
     shortStatus = "FT";
-  } else if (statusUpper === "IN_PLAY") {
+  } else if (statusUpper === "IN_PLAY" || statusUpper === "LIVE") {
     shortStatus = "LIVE";
   } else if (statusUpper === "PAUSED") {
     shortStatus = "HT";
   } else if (statusUpper === "POSTPONED") {
     shortStatus = "PST";
-  } else if (statusUpper === "CANCELLED" || statusUpper === "CANCELED") {
+  } else if (statusUpper === "CANCELLED" || statusUpper === "CANCELED" || statusUpper === "SUSPENDED") {
     shortStatus = "CANC";
   }
 
